@@ -2,7 +2,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { Codex } from "@openai/codex-sdk";
-import type { CodexOptions, Thread, ThreadOptions } from "@openai/codex-sdk";
+import type { CodexOptions, Input, Thread, ThreadOptions } from "@openai/codex-sdk";
 
 export type AgentDefinition = {
   name: string;
@@ -55,6 +55,11 @@ type AgentRuntime = {
   unseenMessages: BufferedMessage[];
   readyToConclude: boolean;
   hasSpoken: boolean;
+};
+
+type TextInput = {
+  type: "text";
+  text: string;
 };
 
 const DEFAULT_MAX_TURNS = 50;
@@ -126,16 +131,18 @@ export class MultiAgentOrchestrator {
       }
 
       const unseenSnapshot = [...runtime.unseenMessages];
-      const prompt = this.buildTurnPrompt({
+      const turnInput = this.buildTurnInput({
         agent: runtime.definition,
         isFirstTurnForAgent: !runtime.hasSpoken,
         conversationGoal: input.conversationGoal,
         unseenMessages: unseenSnapshot,
+        turnNumber,
+        maxTurns,
       });
       const allowedNextAgents = this.getAllowedNextAgents(speaker);
       const outputSchema = createTurnOutputSchema(allowedNextAgents);
 
-      const turn = await runtime.thread.run(prompt, { outputSchema });
+      const turn = await runtime.thread.run(turnInput, { outputSchema });
       const parsed = parseAgentTurnOutput(turn.finalResponse, allowedNextAgents);
 
       runtime.unseenMessages = [];
@@ -168,6 +175,7 @@ export class MultiAgentOrchestrator {
       await this.appendTurnLog({
         timestamp: nowIso(),
         turnNumber,
+        maxTurns,
         speaker,
         answer: parsed.answer,
         nextAgent: parsed.nextAgent,
@@ -236,18 +244,16 @@ export class MultiAgentOrchestrator {
     return true;
   }
 
-  private buildTurnPrompt(input: {
+  private buildTurnInput(input: {
     agent: AgentDefinition;
     isFirstTurnForAgent: boolean;
     conversationGoal: string;
     unseenMessages: BufferedMessage[];
-  }): string {
-    const unseenBlock =
-      input.unseenMessages.length === 0
-        ? "- (none)"
-        : input.unseenMessages
-            .map((message) => `- [turn ${message.turnNumber}] ${message.from}: ${message.answer}`)
-            .join("\n");
+    turnNumber: number;
+    maxTurns: number;
+  }): Input {
+    const unseenMessageEntries = buildUnseenBlock(input.unseenMessages);
+    const turnContext = `Turn context: ${input.turnNumber}/${input.maxTurns}.`;
 
     if (input.isFirstTurnForAgent) {
       const participantsBlock = this.agentNames
@@ -261,25 +267,37 @@ export class MultiAgentOrchestrator {
         .join("\n");
 
       const sharedInstructionsBlock = this.sharedInstructions.trim();
-      const sections = [
+      const setupParts = [
         `You are agent "${input.agent.name}".`,
         `Conversation goal:\n${input.conversationGoal}`,
+        `Conversation max turns: ${input.maxTurns}.`,
         `All agents in this conversation:\n${participantsBlock}`,
-        sharedInstructionsBlock.length > 0 ? `Shared instructions:\n${sharedInstructionsBlock}` : "",
-        `Only new final responses from other agents that you have not seen yet:\n${unseenBlock}`,
-        "Set nextAgent to one of the other agents, not yourself.",
-        "Return valid JSON only that matches the output schema.",
-      ].filter((section) => section.length > 0);
+      ];
+      if (sharedInstructionsBlock.length > 0) {
+        setupParts.push(`Shared instructions:\n${sharedInstructionsBlock}`);
+      }
 
-      return sections.join("\n\n");
+      const protocolBlock = [
+        "Conversation protocol (apply on every turn):",
+        '- Return a JSON object with keys: "answer", "nextAgent", "readyToConclude".',
+        '- "nextAgent" chooses which other agent should speak next.',
+        '- Set "readyToConclude" to true only when you have no further meaningful contribution right now.',
+        "- If later asked to speak again, continue normally and set readyToConclude based on that turn.",
+      ].join("\n");
+
+      return [
+        toTextInput(setupParts.join("\n\n")),
+        toTextInput(turnContext),
+        toTextInput(protocolBlock),
+        toTextInput("Only new final responses from other agents that you have not seen yet:"),
+        ...unseenMessageEntries.map((entry) => toTextInput(entry)),
+      ];
     }
 
     return [
-      "Continue the same multi-agent conversation using your established role/context.",
-      `Only new final responses from other agents that you have not seen yet:\n${unseenBlock}`,
-      "Set nextAgent to one of the other agents, not yourself.",
-      "Return valid JSON only that matches the output schema.",
-    ].join("\n\n");
+      toTextInput(turnContext),
+      ...unseenMessageEntries.map((entry) => toTextInput(entry)),
+    ];
   }
 
   private async appendConversationStart(input: {
@@ -322,6 +340,7 @@ export class MultiAgentOrchestrator {
   private async appendTurnLog(input: {
     timestamp: string;
     turnNumber: number;
+    maxTurns: number;
     speaker: string;
     answer: string;
     nextAgent: string;
@@ -334,7 +353,7 @@ export class MultiAgentOrchestrator {
     }
 
     const body = [
-      `## Turn ${input.turnNumber} - ${input.speaker}`,
+      `## Turn ${input.turnNumber}/${input.maxTurns} - ${input.speaker}`,
       "",
       `- Time: ${input.timestamp}`,
       `- Next speaker: ${input.nextAgent}`,
@@ -485,4 +504,15 @@ function toBlockquote(text: string): string {
     .split("\n")
     .map((line) => `> ${line}`)
     .join("\n");
+}
+
+function toTextInput(text: string): TextInput {
+  return { type: "text", text };
+}
+
+function buildUnseenBlock(messages: BufferedMessage[]): string[] {
+  if (messages.length === 0) {
+    return ["- (none)"];
+  }
+  return messages.map((message) => `- [turn ${message.turnNumber}] ${message.from}: ${message.answer}`);
 }

@@ -20,6 +20,9 @@ This project implements your model on top of `@openai/codex-sdk`:
 npm install
 ```
 
+This repo uses npm workspaces and consumes the local SDK package from
+`codex-sdk/typescript` (`@openai/codex-sdk` via `workspace:*`).
+
 ## Run Demo
 
 ```bash
@@ -28,10 +31,40 @@ npm run demo -- "Plan how we migrate a monolith to services with low risk"
 
 Optional env vars:
 
-- `CONVERSATION_LOG_PATH` (default: `./conversation.log.md`)
+- `CONVERSATION_LOG_PATH` (optional fixed path; if omitted, a unique per-run file is created under `logs/conversations/`)
+- `CONVERSATION_MODEL` (optional model override for multi-agent conversation turns)
 
 The log file is written incrementally while the conversation runs as readable Markdown
 with clear speaker sections and turn delimiters.
+
+## Evaluate One Prompt
+
+This runs:
+1. Multi-agent conversation generation.
+2. A single Codex QA pass over the initial prompt + generated conversation log.
+3. Structured QA output: `{ "score": number, "reason": string }`.
+
+```bash
+npm run eval:single -- "Plan how we migrate a monolith to services with low risk"
+```
+
+Outputs:
+- A per-run conversation log in `logs/conversations/...`
+- A structured evaluation report in `logs/evals/...-eval-report.json`
+
+## Evaluate Test Suite In Parallel
+
+```bash
+npm run eval:suite
+```
+
+Optional env vars:
+
+- `EVAL_CONCURRENCY` (default: `3`)
+- `CONVERSATION_MODEL` (optional model override for conversation generation)
+- `QA_MODEL` (optional model override for QA scoring pass)
+
+This runs the base prompt set from `src/evals/eval-test-cases.ts` in parallel, runs QA scoring for each case, and writes an aggregated structured report to `logs/evals/...-eval-report.json`.
 
 ## Core API
 
@@ -52,7 +85,7 @@ const orchestrator = new MultiAgentOrchestrator(
 const result = await orchestrator.runConversation({
   conversationGoal: "Solve X",
   firstSpeaker: "AgentA",
-  maxTurns: 20,
+  maxTurns: 50,
 });
 ```
 

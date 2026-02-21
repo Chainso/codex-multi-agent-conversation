@@ -2,17 +2,25 @@
   "name": "codex-multi-agent-conversation",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "codex-sdk/typescript"
+  ],
   "type": "module",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run build:all",
+    "build:app": "tsc -p tsconfig.json",
+    "build:sdk": "npm run -w @openai/codex-sdk build",
+    "build:all": "npm run build:sdk && npm run build:app",
     "check": "tsc --noEmit -p tsconfig.json",
-    "demo": "tsx src/demo.ts"
+    "demo": "tsx src/demo.ts",
+    "eval:single": "tsx src/evals/eval-single.ts",
+    "eval:suite": "tsx src/evals/eval-suite.ts"
   },
   "dependencies": {
-    "@openai/codex-sdk": "latest"
+    "@openai/codex-sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
