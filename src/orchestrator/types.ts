@@ -3,6 +3,7 @@ import type { Codex, CodexOptions, Thread, ThreadOptions } from "@openai/codex-s
 export type AgentDefinition = {
   name: string;
   rolePrompt?: string;
+  model?: string;
 };
 
 export type AgentTurnOutput = {

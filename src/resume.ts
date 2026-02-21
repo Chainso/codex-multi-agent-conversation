@@ -1,4 +1,5 @@
 import { resumeConversationById } from "./conversation-runner.js";
+import { parseAgentModelsJson } from "./agent-models.js";
 
 const conversationId = process.argv[2];
 if (!conversationId) {
@@ -6,6 +7,7 @@ if (!conversationId) {
 }
 
 const warningTurnsBeforeMax = parseNonNegativeInt(process.env.WARNING_TURNS_BEFORE_MAX);
+const agentModels = parseAgentModelsJson(process.env.AGENT_MODELS_JSON);
 
 const run = await resumeConversationById({
   conversationId,
@@ -13,6 +15,7 @@ const run = await resumeConversationById({
   maxTurns: parsePositiveInt(process.env.MAX_TURNS_OVERRIDE),
   warningTurnsBeforeMax,
   model: process.env.CONVERSATION_MODEL,
+  agentModels,
   codexPathOverride: process.env.CODEX_PATH_OVERRIDE,
   logFilePath: process.env.CONVERSATION_LOG_PATH,
 });

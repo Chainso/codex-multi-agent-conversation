@@ -7,9 +7,12 @@ import {
   DEFAULT_FIRST_SPEAKER,
   DEFAULT_SHARED_INSTRUCTIONS,
 } from "./default-conversation-setup.js";
+import { applyAgentModelOverrides, type AgentModelOverrides } from "./agent-models.js";
 import { createPersistenceHooks } from "./conversations/persistence-hooks.js";
 import { SqliteConversationStore } from "./conversations/sqlite-conversation-store.js";
 import { createConversationLogPath } from "./path-utils.js";
+
+export type { AgentModelOverrides };
 
 export type RunConversationForPromptInput = {
   prompt: string;
@@ -22,6 +25,7 @@ export type RunConversationForPromptInput = {
   logBaseDir?: string;
   logLabel?: string;
   model?: string;
+  agentModels?: AgentModelOverrides;
   threadOptions?: ThreadOptions;
   codexPathOverride?: string;
 };
@@ -50,7 +54,9 @@ export async function runConversationForPrompt(
       label: input.logLabel,
     });
 
-  const orchestrator = new MultiAgentOrchestrator(DEFAULT_AGENTS, {
+  const agentDefinitions = applyAgentModelOverrides(DEFAULT_AGENTS, input.agentModels);
+
+  const orchestrator = new MultiAgentOrchestrator(agentDefinitions, {
     codexOptions: input.codexPathOverride
       ? {
           codexPathOverride: input.codexPathOverride,
@@ -92,6 +98,7 @@ export type ResumeConversationByIdInput = {
   maxTurns?: number;
   warningTurnsBeforeMax?: number;
   model?: string;
+  agentModels?: AgentModelOverrides;
   threadOptions?: ThreadOptions;
   codexPathOverride?: string;
   logFilePath?: string;
@@ -118,6 +125,10 @@ export async function resumeConversationById(
 
   const snapshot = {
     ...persisted.orchestratorState,
+    agentDefinitions: applyAgentModelOverrides(
+      persisted.orchestratorState.agentDefinitions,
+      input.agentModels,
+    ),
     threadOptions: {
       ...persisted.orchestratorState.threadOptions,
       ...input.threadOptions,

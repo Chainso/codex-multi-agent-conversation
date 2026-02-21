@@ -17,11 +17,13 @@ export { MultiAgentOrchestrator } from "./orchestrator.js";
 export { runConversationForPrompt } from "./conversation-runner.js";
 export { resumeConversationById } from "./conversation-runner.js";
 export type {
+  AgentModelOverrides,
   RunConversationForPromptInput,
   RunConversationForPromptResult,
   ResumeConversationByIdInput,
   ResumeConversationByIdResult,
 } from "./conversation-runner.js";
+export { applyAgentModelOverrides, parseAgentModelsJson } from "./agent-models.js";
 export { evaluateConversation } from "./evals/qa-evaluator.js";
 export type { QaEvaluation, EvaluateConversationInput } from "./evals/qa-evaluator.js";
 export { SqliteConversationStore } from "./conversations/sqlite-conversation-store.js";

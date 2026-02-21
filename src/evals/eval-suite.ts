@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { runConversationForPrompt } from "../conversation-runner.js";
+import { parseAgentModelsJson } from "../agent-models.js";
 import { BASE_PROMPT_TEST_CASES } from "./eval-test-cases.js";
 import { createEvalReportPath, createRunStamp, slugify } from "../path-utils.js";
 import { evaluateConversation } from "./qa-evaluator.js";
@@ -29,6 +30,7 @@ const qaModel = process.env.QA_MODEL;
 const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
 const warningTurnsBeforeMax = parseNonNegativeInt(process.env.WARNING_TURNS_BEFORE_MAX);
 const sqlitePath = process.env.CONVERSATIONS_DB_PATH;
+const agentModels = parseAgentModelsJson(process.env.AGENT_MODELS_JSON);
 
 const results = await runWithConcurrency(BASE_PROMPT_TEST_CASES, concurrency, async (testCase) => {
   const caseLabel = slugify(testCase.id);
@@ -41,6 +43,7 @@ const results = await runWithConcurrency(BASE_PROMPT_TEST_CASES, concurrency, as
     maxTurns: 50,
     warningTurnsBeforeMax,
     model: conversationModel,
+    agentModels,
     codexPathOverride,
   });
 
@@ -77,6 +80,7 @@ const report = {
   runStamp,
   concurrency,
   conversationModel: conversationModel ?? null,
+  agentModels: agentModels ?? null,
   qaModel: qaModel ?? null,
   codexPathOverride: codexPathOverride ?? null,
   warningTurnsBeforeMax: warningTurnsBeforeMax ?? null,

@@ -1,9 +1,11 @@
 import { runConversationForPrompt } from "./conversation-runner.js";
+import { parseAgentModelsJson } from "./agent-models.js";
 
 const conversationGoal =
   process.argv.slice(2).join(" ").trim() ||
   "Design a high-level rollout plan for introducing feature flags in a legacy web app.";
 const warningTurnsBeforeMax = parseNonNegativeInt(process.env.WARNING_TURNS_BEFORE_MAX);
+const agentModels = parseAgentModelsJson(process.env.AGENT_MODELS_JSON);
 
 const run = await runConversationForPrompt({
   prompt: conversationGoal,
@@ -12,6 +14,7 @@ const run = await runConversationForPrompt({
   maxTurns: 50,
   warningTurnsBeforeMax,
   model: process.env.CONVERSATION_MODEL ?? "gpt-5.1-codex-mini",
+  agentModels,
   codexPathOverride: process.env.CODEX_PATH_OVERRIDE,
 });
 

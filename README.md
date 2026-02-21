@@ -68,6 +68,7 @@ Base test cases are in `src/evals/eval-test-cases.ts`.
 Common environment variables:
 
 - `CONVERSATION_MODEL`: conversation model override.
+- `AGENT_MODELS_JSON`: per-agent model overrides for scripts as JSON, e.g. `{"Planner":"gpt-5.1-codex-mini","Skeptic":"gpt-5.1-codex"}`.
 - `QA_MODEL`: QA evaluation model override.
 - `CODEX_PATH_OVERRIDE`: absolute path to `codex` binary.
 - `CONVERSATIONS_DB_PATH`: SQLite file path (default `./conversations.db`).
@@ -83,7 +84,11 @@ import { MultiAgentOrchestrator } from "./src/index.js";
 
 const orchestrator = new MultiAgentOrchestrator(
   [
-    { name: "Planner", rolePrompt: "Break work into practical phases." },
+    {
+      name: "Planner",
+      rolePrompt: "Break work into practical phases.",
+      model: "gpt-5.1-codex-mini",
+    },
     { name: "Skeptic", rolePrompt: "Stress test assumptions." },
     { name: "Builder", rolePrompt: "Propose implementation details." },
   ],
@@ -99,5 +104,7 @@ const result = await orchestrator.runConversation({
   maxTurns: 50,
 });
 ```
+
+`AgentDefinition.model` overrides the global thread model for that specific agent.
 
 Main orchestration entrypoint: `src/orchestrator.ts`.

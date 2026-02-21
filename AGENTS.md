@@ -66,6 +66,7 @@ This project orchestrates multi-agent conversations using `@openai/codex-sdk`:
 ## Common env vars
 
 - `CONVERSATION_MODEL`
+- `AGENT_MODELS_JSON`
 - `QA_MODEL`
 - `CODEX_PATH_OVERRIDE`
 - `CONVERSATIONS_DB_PATH`
@@ -73,4 +74,3 @@ This project orchestrates multi-agent conversations using `@openai/codex-sdk`:
 - `WARNING_TURNS_BEFORE_MAX`
 - `MAX_TURNS_OVERRIDE`
 - `EVAL_CONCURRENCY`
-

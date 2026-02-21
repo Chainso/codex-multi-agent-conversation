@@ -2,6 +2,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { runConversationForPrompt } from "../conversation-runner.js";
+import { parseAgentModelsJson } from "../agent-models.js";
 import { createEvalReportPath, createRunStamp } from "../path-utils.js";
 import { evaluateConversation } from "./qa-evaluator.js";
 
@@ -15,6 +16,7 @@ const qaModel = process.env.QA_MODEL;
 const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
 const warningTurnsBeforeMax = parseNonNegativeInt(process.env.WARNING_TURNS_BEFORE_MAX);
 const sqlitePath = process.env.CONVERSATIONS_DB_PATH;
+const agentModels = parseAgentModelsJson(process.env.AGENT_MODELS_JSON);
 const conversationRun = await runConversationForPrompt({
   prompt,
   sqlitePath,
@@ -23,6 +25,7 @@ const conversationRun = await runConversationForPrompt({
   maxTurns: 50,
   warningTurnsBeforeMax,
   model: conversationModel,
+  agentModels,
   codexPathOverride,
 });
 
@@ -47,6 +50,7 @@ const report = {
   concluded: conversationRun.conversation.concluded,
   stopReason: conversationRun.conversation.stopReason,
   conversationModel: conversationModel ?? null,
+  agentModels: agentModels ?? null,
   qaModel: qaModel ?? null,
   codexPathOverride: codexPathOverride ?? null,
   warningTurnsBeforeMax: warningTurnsBeforeMax ?? null,

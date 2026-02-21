@@ -69,9 +69,10 @@ export class MultiAgentOrchestrator {
 
     for (const definition of agentDefinitions) {
       const initialState = options.initialAgentStates?.[definition.name];
+      const agentThreadOptions = this.getThreadOptionsForAgent(definition);
       const thread = initialState?.threadId
-        ? this.codex.resumeThread(initialState.threadId, this.threadOptions)
-        : this.codex.startThread(this.threadOptions);
+        ? this.codex.resumeThread(initialState.threadId, agentThreadOptions)
+        : this.codex.startThread(agentThreadOptions);
       this.agents.set(definition.name, {
         definition,
         thread,
@@ -345,6 +346,10 @@ export class MultiAgentOrchestrator {
       }
     }
     return true;
+  }
+
+  private getThreadOptionsForAgent(agent: AgentDefinition): ThreadOptions {
+    return agent.model ? { ...this.threadOptions, model: agent.model } : this.threadOptions;
   }
 
   private async appendMarkdown(markdown: string): Promise<void> {

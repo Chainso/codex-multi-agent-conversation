@@ -9,7 +9,13 @@ export function formatConversationStartLog(input: {
   agents: AgentDefinition[];
 }): string {
   const roles = input.agents
-    .map((agent) => (agent.rolePrompt ? `- **${agent.name}**: ${agent.rolePrompt}` : `- **${agent.name}**`))
+    .map((agent) => {
+      const modelPart = agent.model ? ` (model: ${agent.model})` : "";
+      if (agent.rolePrompt) {
+        return `- **${agent.name}**${modelPart}: ${agent.rolePrompt}`;
+      }
+      return `- **${agent.name}**${modelPart}`;
+    })
     .join("\n");
 
   return [
