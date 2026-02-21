@@ -94,4 +94,37 @@ describe("CodexExec", () => {
     expect(resumeIndex).toBeLessThan(imageIndex);
   });
 
+  it("places fork args before image args", async () => {
+    const { CodexExec } = await import("../src/exec");
+    spawnMock.mockClear();
+    const child = new FakeChildProcess();
+    spawnMock.mockReturnValue(child as unknown as child_process.ChildProcess);
+
+    setImmediate(() => {
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("exit", 0, null);
+    });
+
+    const exec = new CodexExec("codex");
+    for await (const _ of exec.run({
+      input: "hi",
+      images: ["img.png"],
+      threadId: "thread-id",
+      fork: true,
+    })) {
+      // no-op
+    }
+
+    const commandArgs = spawnMock.mock.calls[0]?.[1] as string[] | undefined;
+    expect(commandArgs).toBeDefined();
+    const forkCommandIndex = commandArgs!.indexOf("fork");
+    const threadIdIndex = commandArgs!.indexOf("thread-id");
+    const imageIndex = commandArgs!.indexOf("--image");
+    expect(forkCommandIndex).toBeGreaterThan(-1);
+    expect(threadIdIndex).toBeGreaterThan(-1);
+    expect(imageIndex).toBeGreaterThan(-1);
+    expect(forkCommandIndex).toBeLessThan(threadIdIndex);
+    expect(threadIdIndex).toBeLessThan(imageIndex);
+  });
 });

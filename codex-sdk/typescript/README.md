@@ -105,6 +105,13 @@ const thread = codex.resumeThread(savedThreadId);
 await thread.run("Implement the fix");
 ```
 
+To branch from an existing thread instead of continuing it directly, set `fork: true`.
+
+```typescript
+const thread = codex.resumeThread(savedThreadId, { fork: true });
+await thread.run("Try an alternative implementation");
+```
+
 ### Working directory controls
 
 Codex runs in the current working directory by default. To avoid unrecoverable errors, Codex requires the working directory to be a Git repository. You can skip the Git repository check by passing the `skipGitRepoCheck` option when creating a thread.

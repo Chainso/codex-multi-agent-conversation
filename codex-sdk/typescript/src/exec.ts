@@ -12,6 +12,8 @@ export type CodexExecArgs = {
   baseUrl?: string;
   apiKey?: string;
   threadId?: string | null;
+  // When resuming by thread ID, use `fork` instead of `resume`
+  fork?: boolean;
   images?: string[];
   // --model
   model?: string;
@@ -128,7 +130,7 @@ export class CodexExec {
     }
 
     if (args.threadId) {
-      commandArgs.push("resume", args.threadId);
+      commandArgs.push(args.fork ? "fork" : "resume", args.threadId);
     }
 
     if (args.images?.length) {
@@ -220,7 +222,6 @@ export class CodexExec {
       }
     }
   }
-
 }
 
 function serializeConfigOverrides(configOverrides: CodexConfigObject): string[] {
