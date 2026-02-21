@@ -18,7 +18,7 @@ import type {
   OrchestratorStateSnapshot,
   RunConversationInput,
 } from "./orchestrator/types.js";
-import { nowIso, validateUniqueNames } from "./orchestrator/utils.js";
+import { nowIso, repetitionSimilarity, validateUniqueNames } from "./orchestrator/utils.js";
 
 export type {
   AgentDefinition,
@@ -78,6 +78,7 @@ export class MultiAgentOrchestrator {
         unseenMessages: initialState ? [...initialState.unseenMessages] : [],
         readyToConclude: initialState?.readyToConclude ?? false,
         hasSpoken: initialState?.hasSpoken ?? false,
+        lastAnswer: initialState?.lastAnswer ?? null,
       });
     }
   }
@@ -182,6 +183,7 @@ export class MultiAgentOrchestrator {
         conversationGoal: input.conversationGoal,
         unseenMessages: unseenSnapshot,
         warningMessage,
+        enforceNoRepeatMode: runtime.hasSpoken && unseenSnapshot.length === 0,
       });
 
       const allowedNextAgents = this.getAllowedNextAgents(speaker);
@@ -189,32 +191,40 @@ export class MultiAgentOrchestrator {
 
       const turn = await runtime.thread.run(turnInput, { outputSchema });
       const parsed = parseAgentTurnOutput(turn.finalResponse, allowedNextAgents);
+      const similarityToPrevious =
+        runtime.lastAnswer === null ? 0 : repetitionSimilarity(parsed.answer, runtime.lastAnswer);
+      const repetitiveNoUpdateTurn =
+        unseenSnapshot.length === 0 && runtime.hasSpoken && similarityToPrevious >= 0.9;
+      const readyToConclude = parsed.readyToConclude || repetitiveNoUpdateTurn;
 
       runtime.unseenMessages = [];
-      runtime.readyToConclude = parsed.readyToConclude;
+      runtime.readyToConclude = readyToConclude;
       runtime.hasSpoken = true;
+      runtime.lastAnswer = parsed.answer;
 
       const turnRecord: ConversationTurn = {
         turnNumber,
         speaker,
         answer: parsed.answer,
         nextAgent: parsed.nextAgent,
-        readyToConclude: parsed.readyToConclude,
+        readyToConclude,
         rawResponse: turn.finalResponse,
         unseenMessagesConsumed: unseenSnapshot.length,
         threadId: runtime.thread.id,
       };
       turns.push(turnRecord);
 
-      for (const otherRuntime of this.agents.values()) {
-        if (otherRuntime.definition.name === speaker) {
-          continue;
+      if (!repetitiveNoUpdateTurn) {
+        for (const otherRuntime of this.agents.values()) {
+          if (otherRuntime.definition.name === speaker) {
+            continue;
+          }
+          otherRuntime.unseenMessages.push({
+            from: speaker,
+            answer: parsed.answer,
+            turnNumber,
+          });
         }
-        otherRuntime.unseenMessages.push({
-          from: speaker,
-          answer: parsed.answer,
-          turnNumber,
-        });
       }
 
       await this.appendMarkdown(
@@ -301,6 +311,7 @@ export class MultiAgentOrchestrator {
         unseenMessages: runtime.unseenMessages.map((message) => ({ ...message })),
         readyToConclude: runtime.readyToConclude,
         hasSpoken: runtime.hasSpoken,
+        lastAnswer: runtime.lastAnswer,
       };
     }
     return {

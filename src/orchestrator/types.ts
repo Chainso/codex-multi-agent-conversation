@@ -55,6 +55,7 @@ export type AgentRuntime = {
   unseenMessages: BufferedMessage[];
   readyToConclude: boolean;
   hasSpoken: boolean;
+  lastAnswer: string | null;
 };
 
 export type AgentRuntimeState = {
@@ -62,6 +63,7 @@ export type AgentRuntimeState = {
   unseenMessages: BufferedMessage[];
   readyToConclude: boolean;
   hasSpoken: boolean;
+  lastAnswer: string | null;
 };
 
 export type OrchestratorStateSnapshot = {

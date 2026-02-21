@@ -10,6 +10,7 @@ type BuildTurnInputArgs = {
   conversationGoal: string;
   unseenMessages: BufferedMessage[];
   warningMessage: string | null;
+  enforceNoRepeatMode: boolean;
 };
 
 type TextInput = {
@@ -41,20 +42,48 @@ export function buildTurnInput(args: BuildTurnInputArgs): Input {
       '- "nextAgent" chooses which other agent should speak next.',
       '- Set "readyToConclude" to true only when you have no further meaningful contribution right now.',
       "- If later asked to speak again, continue normally and set readyToConclude based on that turn.",
+      "- Agents have independent internal context. Across agents, only final answers are shared.",
+      "- Delta-only rule: answer with net-new information relative to the shared final answers already known to other agents.",
+      "- Do not restate, reformat, or paraphrase already-shared information unless correcting it.",
+      "- If you have no net-new information, provide a brief no-change update (one sentence) and set readyToConclude=true.",
     ].join("\n");
+
+    const firstTurnNoUnseenBlock =
+      unseenMessageEntries.length === 0
+        ? [toTextInput("No unseen messages from other agents yet.")]
+        : unseenMessageEntries.map((entry) => toTextInput(entry));
 
     return [
       toTextInput(setupParts.join("\n\n")),
       toTextInput(protocolBlock),
       ...(args.warningMessage ? [toTextInput(args.warningMessage)] : []),
       toTextInput("Only new final responses from other agents that you have not seen yet:"),
-      ...unseenMessageEntries.map((entry) => toTextInput(entry)),
+      ...firstTurnNoUnseenBlock,
     ];
   }
 
+  const deltaOnlyReminder = toTextInput(
+    "Delta-only reminder: other agents only see final answers, not your internal reasoning. Add only net-new information versus already-shared final answers.",
+  );
+
+  const repetitionGuardBlock = args.enforceNoRepeatMode
+    ? [
+        toTextInput(
+          "No new unseen messages since your last turn. Do not repeat information other agents already know from shared final answers. Either add one net-new point (max 2 sentences) or provide a one-sentence no-change update and set readyToConclude=true.",
+        ),
+      ]
+    : [];
+
+  const unseenBlock =
+    unseenMessageEntries.length === 0
+      ? [toTextInput("No new unseen messages.")]
+      : unseenMessageEntries.map((entry) => toTextInput(entry));
+
   return [
     ...(args.warningMessage ? [toTextInput(args.warningMessage)] : []),
-    ...unseenMessageEntries.map((entry) => toTextInput(entry)),
+    deltaOnlyReminder,
+    ...repetitionGuardBlock,
+    ...unseenBlock,
   ];
 }
 
@@ -72,7 +101,7 @@ export function resolveWarningStartTurn(input: {
 
 function buildUnseenEntries(messages: BufferedMessage[]): string[] {
   if (messages.length === 0) {
-    return ["- (none)"];
+    return [];
   }
   return messages.map((message) => `- [turn ${message.turnNumber}] ${message.from}: ${message.answer}`);
 }
