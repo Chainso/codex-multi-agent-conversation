@@ -12,17 +12,24 @@ const prompt =
 const runStamp = createRunStamp();
 const conversationModel = process.env.CONVERSATION_MODEL;
 const qaModel = process.env.QA_MODEL;
+const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
 const conversationRun = await runConversationForPrompt({
   prompt,
   runStamp,
   logLabel: "single",
   maxTurns: 50,
   model: conversationModel,
+  codexPathOverride,
 });
 
 const qa = await evaluateConversation({
   initialPrompt: prompt,
   conversationLogPath: conversationRun.logFilePath,
+  codexOptions: codexPathOverride
+    ? {
+        codexPathOverride,
+      }
+    : undefined,
   threadOptions: qaModel ? { model: qaModel } : undefined,
 });
 
@@ -35,6 +42,7 @@ const report = {
   stopReason: conversationRun.conversation.stopReason,
   conversationModel: conversationModel ?? null,
   qaModel: qaModel ?? null,
+  codexPathOverride: codexPathOverride ?? null,
   qa,
 };
 

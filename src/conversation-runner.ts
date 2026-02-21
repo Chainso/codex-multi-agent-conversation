@@ -16,6 +16,7 @@ export type RunConversationForPromptInput = {
   logLabel?: string;
   model?: string;
   threadOptions?: ThreadOptions;
+  codexPathOverride?: string;
 };
 
 export type RunConversationForPromptResult = {
@@ -37,6 +38,11 @@ export async function runConversationForPrompt(
     });
 
   const orchestrator = new MultiAgentOrchestrator(DEFAULT_AGENTS, {
+    codexOptions: input.codexPathOverride
+      ? {
+          codexPathOverride: input.codexPathOverride,
+        }
+      : undefined,
     sharedInstructions: DEFAULT_SHARED_INSTRUCTIONS,
     logFilePath,
     threadOptions: {

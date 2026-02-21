@@ -33,6 +33,7 @@ Optional env vars:
 
 - `CONVERSATION_LOG_PATH` (optional fixed path; if omitted, a unique per-run file is created under `logs/conversations/`)
 - `CONVERSATION_MODEL` (optional model override for multi-agent conversation turns)
+- `CODEX_PATH_OVERRIDE` (optional absolute path to `codex` binary; useful with local SDK forks)
 
 The log file is written incrementally while the conversation runs as readable Markdown
 with clear speaker sections and turn delimiters.
@@ -63,6 +64,7 @@ Optional env vars:
 - `EVAL_CONCURRENCY` (default: `3`)
 - `CONVERSATION_MODEL` (optional model override for conversation generation)
 - `QA_MODEL` (optional model override for QA scoring pass)
+- `CODEX_PATH_OVERRIDE` (optional absolute path to `codex` binary)
 
 This runs the base prompt set from `src/evals/eval-test-cases.ts` in parallel, runs QA scoring for each case, and writes an aggregated structured report to `logs/evals/...-eval-report.json`.
 

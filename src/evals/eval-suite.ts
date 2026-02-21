@@ -24,6 +24,7 @@ const runStamp = createRunStamp();
 const suiteConversationDir = join("logs/conversations", `suite-${runStamp}`);
 const conversationModel = process.env.CONVERSATION_MODEL;
 const qaModel = process.env.QA_MODEL;
+const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
 
 const results = await runWithConcurrency(BASE_PROMPT_TEST_CASES, concurrency, async (testCase) => {
   const caseLabel = slugify(testCase.id);
@@ -34,11 +35,17 @@ const results = await runWithConcurrency(BASE_PROMPT_TEST_CASES, concurrency, as
     logFilePath: conversationLogPath,
     maxTurns: 50,
     model: conversationModel,
+    codexPathOverride,
   });
 
   const qa = await evaluateConversation({
     initialPrompt: testCase.prompt,
     conversationLogPath,
+    codexOptions: codexPathOverride
+      ? {
+          codexPathOverride,
+        }
+      : undefined,
     threadOptions: qaModel ? { model: qaModel } : undefined,
   });
 
@@ -63,6 +70,7 @@ const report = {
   concurrency,
   conversationModel: conversationModel ?? null,
   qaModel: qaModel ?? null,
+  codexPathOverride: codexPathOverride ?? null,
   cases: sortedResults.length,
   averageScore,
   results: sortedResults,

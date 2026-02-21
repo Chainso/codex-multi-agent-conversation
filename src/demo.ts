@@ -8,7 +8,8 @@ const run = await runConversationForPrompt({
   prompt: conversationGoal,
   logFilePath: process.env.CONVERSATION_LOG_PATH,
   maxTurns: 50,
-  model: process.env.CONVERSATION_MODEL,
+  model: process.env.CONVERSATION_MODEL ?? "gpt-5.1-codex-mini",
+  codexPathOverride: process.env.CODEX_PATH_OVERRIDE,
 });
 
 for (const turn of run.conversation.turns) {

@@ -136,8 +136,6 @@ export class MultiAgentOrchestrator {
         isFirstTurnForAgent: !runtime.hasSpoken,
         conversationGoal: input.conversationGoal,
         unseenMessages: unseenSnapshot,
-        turnNumber,
-        maxTurns,
       });
       const allowedNextAgents = this.getAllowedNextAgents(speaker);
       const outputSchema = createTurnOutputSchema(allowedNextAgents);
@@ -249,11 +247,8 @@ export class MultiAgentOrchestrator {
     isFirstTurnForAgent: boolean;
     conversationGoal: string;
     unseenMessages: BufferedMessage[];
-    turnNumber: number;
-    maxTurns: number;
   }): Input {
     const unseenMessageEntries = buildUnseenBlock(input.unseenMessages);
-    const turnContext = `Turn context: ${input.turnNumber}/${input.maxTurns}.`;
 
     if (input.isFirstTurnForAgent) {
       const participantsBlock = this.agentNames
@@ -270,7 +265,6 @@ export class MultiAgentOrchestrator {
       const setupParts = [
         `You are agent "${input.agent.name}".`,
         `Conversation goal:\n${input.conversationGoal}`,
-        `Conversation max turns: ${input.maxTurns}.`,
         `All agents in this conversation:\n${participantsBlock}`,
       ];
       if (sharedInstructionsBlock.length > 0) {
@@ -287,7 +281,6 @@ export class MultiAgentOrchestrator {
 
       return [
         toTextInput(setupParts.join("\n\n")),
-        toTextInput(turnContext),
         toTextInput(protocolBlock),
         toTextInput("Only new final responses from other agents that you have not seen yet:"),
         ...unseenMessageEntries.map((entry) => toTextInput(entry)),
@@ -295,7 +288,6 @@ export class MultiAgentOrchestrator {
     }
 
     return [
-      toTextInput(turnContext),
       ...unseenMessageEntries.map((entry) => toTextInput(entry)),
     ];
   }
