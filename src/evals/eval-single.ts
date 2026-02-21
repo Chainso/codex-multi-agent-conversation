@@ -13,11 +13,13 @@ const runStamp = createRunStamp();
 const conversationModel = process.env.CONVERSATION_MODEL;
 const qaModel = process.env.QA_MODEL;
 const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
+const warningTurnsBeforeMax = parseNonNegativeInt(process.env.WARNING_TURNS_BEFORE_MAX);
 const conversationRun = await runConversationForPrompt({
   prompt,
   runStamp,
   logLabel: "single",
   maxTurns: 50,
+  warningTurnsBeforeMax,
   model: conversationModel,
   codexPathOverride,
 });
@@ -43,6 +45,7 @@ const report = {
   conversationModel: conversationModel ?? null,
   qaModel: qaModel ?? null,
   codexPathOverride: codexPathOverride ?? null,
+  warningTurnsBeforeMax: warningTurnsBeforeMax ?? null,
   qa,
 };
 
@@ -52,3 +55,14 @@ await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 
 console.log(JSON.stringify(report, null, 2));
 console.log(`Report file: ${reportPath}`);
+
+function parseNonNegativeInt(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error("WARNING_TURNS_BEFORE_MAX must be a non-negative integer.");
+  }
+  return parsed;
+}

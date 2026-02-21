@@ -2,65 +2,30 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { Codex } from "@openai/codex-sdk";
-import type { CodexOptions, Input, Thread, ThreadOptions } from "@openai/codex-sdk";
+import type { ThreadOptions } from "@openai/codex-sdk";
 
-export type AgentDefinition = {
-  name: string;
-  rolePrompt?: string;
-};
+import { formatConversationEndLog, formatConversationStartLog, formatTurnLog } from "./orchestrator/log-format.js";
+import { parseAgentTurnOutput } from "./orchestrator/parsing.js";
+import { buildTurnInput, resolveWarningStartTurn } from "./orchestrator/prompt.js";
+import { createTurnOutputSchema } from "./orchestrator/schema.js";
+import type {
+  AgentDefinition,
+  AgentRuntime,
+  ConversationResult,
+  ConversationTurn,
+  MultiAgentOrchestratorOptions,
+  RunConversationInput,
+} from "./orchestrator/types.js";
+import { nowIso, validateUniqueNames } from "./orchestrator/utils.js";
 
-export type AgentTurnOutput = {
-  answer: string;
-  nextAgent: string;
-  readyToConclude: boolean;
-};
-
-export type ConversationTurn = AgentTurnOutput & {
-  turnNumber: number;
-  speaker: string;
-  rawResponse: string;
-  unseenMessagesConsumed: number;
-  threadId: string | null;
-};
-
-export type ConversationResult = {
-  turns: ConversationTurn[];
-  concluded: boolean;
-  stopReason: "all_agents_ready" | "max_turns_reached";
-};
-
-export type RunConversationInput = {
-  conversationGoal: string;
-  firstSpeaker: string;
-  maxTurns?: number;
-};
-
-export type MultiAgentOrchestratorOptions = {
-  codex?: Codex;
-  codexOptions?: CodexOptions;
-  threadOptions?: ThreadOptions;
-  sharedInstructions?: string;
-  logFilePath?: string;
-};
-
-type BufferedMessage = {
-  from: string;
-  answer: string;
-  turnNumber: number;
-};
-
-type AgentRuntime = {
-  definition: AgentDefinition;
-  thread: Thread;
-  unseenMessages: BufferedMessage[];
-  readyToConclude: boolean;
-  hasSpoken: boolean;
-};
-
-type TextInput = {
-  type: "text";
-  text: string;
-};
+export type {
+  AgentDefinition,
+  AgentTurnOutput,
+  ConversationResult,
+  ConversationTurn,
+  MultiAgentOrchestratorOptions,
+  RunConversationInput,
+} from "./orchestrator/types.js";
 
 const DEFAULT_MAX_TURNS = 50;
 
@@ -68,6 +33,7 @@ export class MultiAgentOrchestrator {
   private readonly codex: Codex;
   private readonly agents = new Map<string, AgentRuntime>();
   private readonly agentNames: string[];
+  private readonly allAgents: AgentDefinition[];
   private readonly sharedInstructions: string;
   private readonly logFilePath?: string;
   private readonly threadOptions: ThreadOptions;
@@ -79,6 +45,7 @@ export class MultiAgentOrchestrator {
       throw new Error("At least two agents must be provided.");
     }
 
+    this.allAgents = [...agentDefinitions];
     this.agentNames = agentDefinitions.map((agent) => agent.name);
     validateUniqueNames(this.agentNames);
 
@@ -111,17 +78,27 @@ export class MultiAgentOrchestrator {
       throw new Error("maxTurns must be greater than 0.");
     }
 
+    const warningStartTurn = resolveWarningStartTurn({
+      maxTurns,
+      agentCount: this.agentNames.length,
+      warningTurnsBeforeMax: input.warningTurnsBeforeMax,
+    });
+
     const turns: ConversationTurn[] = [];
     let speaker = input.firstSpeaker;
     let concluded = false;
     let stopReason: ConversationResult["stopReason"] = "max_turns_reached";
 
-    await this.appendConversationStart({
-      timestamp: nowIso(),
-      conversationGoal: input.conversationGoal,
-      firstSpeaker: input.firstSpeaker,
-      maxTurns,
-    });
+    await this.appendMarkdown(
+      formatConversationStartLog({
+        timestamp: nowIso(),
+        conversationGoal: input.conversationGoal,
+        firstSpeaker: input.firstSpeaker,
+        maxTurns,
+        warningStartTurn,
+        agents: this.allAgents,
+      }),
+    );
 
     for (let turnNumber = 1; turnNumber <= maxTurns; turnNumber += 1) {
       const runtime = this.getAgentRuntime(speaker);
@@ -131,12 +108,21 @@ export class MultiAgentOrchestrator {
       }
 
       const unseenSnapshot = [...runtime.unseenMessages];
-      const turnInput = this.buildTurnInput({
+      const warningMessage =
+        turnNumber >= warningStartTurn
+          ? `Final-turn warning: hard stop at turn ${maxTurns}. Wrap up and converge ASAP.`
+          : null;
+
+      const turnInput = buildTurnInput({
         agent: runtime.definition,
+        allAgents: this.allAgents,
+        sharedInstructions: this.sharedInstructions,
         isFirstTurnForAgent: !runtime.hasSpoken,
         conversationGoal: input.conversationGoal,
         unseenMessages: unseenSnapshot,
+        warningMessage,
       });
+
       const allowedNextAgents = this.getAllowedNextAgents(speaker);
       const outputSchema = createTurnOutputSchema(allowedNextAgents);
 
@@ -170,17 +156,19 @@ export class MultiAgentOrchestrator {
         });
       }
 
-      await this.appendTurnLog({
-        timestamp: nowIso(),
-        turnNumber,
-        maxTurns,
-        speaker,
-        answer: parsed.answer,
-        nextAgent: parsed.nextAgent,
-        readyToConclude: parsed.readyToConclude,
-        unseenMessagesConsumed: unseenSnapshot.length,
-        threadId: runtime.thread.id,
-      });
+      await this.appendMarkdown(
+        formatTurnLog({
+          timestamp: nowIso(),
+          turnNumber,
+          maxTurns,
+          speaker,
+          answer: parsed.answer,
+          nextAgent: parsed.nextAgent,
+          readyToConclude: parsed.readyToConclude,
+          unseenMessagesConsumed: unseenSnapshot.length,
+          threadId: runtime.thread.id,
+        }),
+      );
 
       if (this.allAgentsReadyToConclude()) {
         concluded = true;
@@ -195,12 +183,14 @@ export class MultiAgentOrchestrator {
       speaker = parsed.nextAgent;
     }
 
-    await this.appendConversationEnd({
-      timestamp: nowIso(),
-      concluded,
-      stopReason,
-      turns: turns.length,
-    });
+    await this.appendMarkdown(
+      formatConversationEndLog({
+        timestamp: nowIso(),
+        concluded,
+        stopReason,
+        turns: turns.length,
+      }),
+    );
 
     return {
       turns,
@@ -242,153 +232,6 @@ export class MultiAgentOrchestrator {
     return true;
   }
 
-  private buildTurnInput(input: {
-    agent: AgentDefinition;
-    isFirstTurnForAgent: boolean;
-    conversationGoal: string;
-    unseenMessages: BufferedMessage[];
-  }): Input {
-    const unseenMessageEntries = buildUnseenBlock(input.unseenMessages);
-
-    if (input.isFirstTurnForAgent) {
-      const participantsBlock = this.agentNames
-        .map((name) => {
-          const rolePrompt = this.agents.get(name)?.definition.rolePrompt;
-          if (!rolePrompt) {
-            return `- ${name}`;
-          }
-          return `- ${name}: ${rolePrompt}`;
-        })
-        .join("\n");
-
-      const sharedInstructionsBlock = this.sharedInstructions.trim();
-      const setupParts = [
-        `You are agent "${input.agent.name}".`,
-        `Conversation goal:\n${input.conversationGoal}`,
-        `All agents in this conversation:\n${participantsBlock}`,
-      ];
-      if (sharedInstructionsBlock.length > 0) {
-        setupParts.push(`Shared instructions:\n${sharedInstructionsBlock}`);
-      }
-
-      const protocolBlock = [
-        "Conversation protocol (apply on every turn):",
-        '- Return a JSON object with keys: "answer", "nextAgent", "readyToConclude".',
-        '- "nextAgent" chooses which other agent should speak next.',
-        '- Set "readyToConclude" to true only when you have no further meaningful contribution right now.',
-        "- If later asked to speak again, continue normally and set readyToConclude based on that turn.",
-      ].join("\n");
-
-      return [
-        toTextInput(setupParts.join("\n\n")),
-        toTextInput(protocolBlock),
-        toTextInput("Only new final responses from other agents that you have not seen yet:"),
-        ...unseenMessageEntries.map((entry) => toTextInput(entry)),
-      ];
-    }
-
-    return [
-      ...unseenMessageEntries.map((entry) => toTextInput(entry)),
-    ];
-  }
-
-  private async appendConversationStart(input: {
-    timestamp: string;
-    conversationGoal: string;
-    firstSpeaker: string;
-    maxTurns: number;
-  }): Promise<void> {
-    if (!this.logFilePath) {
-      return;
-    }
-
-    const roles = this.agentNames
-      .map((name) => {
-        const rolePrompt = this.agents.get(name)?.definition.rolePrompt;
-        return rolePrompt ? `- **${name}**: ${rolePrompt}` : `- **${name}**`;
-      })
-      .join("\n");
-
-    const body = [
-      "",
-      "# Multi-Agent Conversation",
-      "",
-      `- Started: ${input.timestamp}`,
-      `- Goal: ${input.conversationGoal}`,
-      `- First speaker: ${input.firstSpeaker}`,
-      `- Max turns: ${input.maxTurns}`,
-      "",
-      "## Participants",
-      "",
-      roles,
-      "",
-      "---",
-      "",
-    ].join("\n");
-
-    await this.appendMarkdown(body);
-  }
-
-  private async appendTurnLog(input: {
-    timestamp: string;
-    turnNumber: number;
-    maxTurns: number;
-    speaker: string;
-    answer: string;
-    nextAgent: string;
-    readyToConclude: boolean;
-    unseenMessagesConsumed: number;
-    threadId: string | null;
-  }): Promise<void> {
-    if (!this.logFilePath) {
-      return;
-    }
-
-    const body = [
-      `## Turn ${input.turnNumber}/${input.maxTurns} - ${input.speaker}`,
-      "",
-      `- Time: ${input.timestamp}`,
-      `- Next speaker: ${input.nextAgent}`,
-      `- ${input.speaker} ready to conclude: ${String(input.readyToConclude)}`,
-      `- Unseen messages consumed: ${input.unseenMessagesConsumed}`,
-      `- Thread ID: ${input.threadId ?? "(pending)"}`,
-      "",
-      "### Message",
-      "",
-      toBlockquote(input.answer),
-      "",
-      "---",
-      "",
-    ].join("\n");
-
-    await this.appendMarkdown(body);
-  }
-
-  private async appendConversationEnd(input: {
-    timestamp: string;
-    concluded: boolean;
-    stopReason: "all_agents_ready" | "max_turns_reached";
-    turns: number;
-  }): Promise<void> {
-    if (!this.logFilePath) {
-      return;
-    }
-
-    const body = [
-      "## Conversation Complete",
-      "",
-      `- Time: ${input.timestamp}`,
-      `- Concluded: ${String(input.concluded)}`,
-      `- Stop reason: ${input.stopReason}`,
-      `- Total turns: ${input.turns}`,
-      "",
-      "---",
-      "",
-    ].join("\n");
-
-    await this.appendMarkdown(body);
-  }
-
   private async appendMarkdown(markdown: string): Promise<void> {
     if (!this.logFilePath) {
       return;
@@ -401,110 +244,4 @@ export class MultiAgentOrchestrator {
 
     await appendFile(this.logFilePath, markdown, "utf8");
   }
-}
-
-function createTurnOutputSchema(nextAgentCandidates: string[]): Record<string, unknown> {
-  return {
-    type: "object",
-    properties: {
-      answer: { type: "string" },
-      nextAgent: { type: "string", enum: nextAgentCandidates },
-      readyToConclude: { type: "boolean" },
-    },
-    required: ["answer", "nextAgent", "readyToConclude"],
-    additionalProperties: false,
-  };
-}
-
-function validateUniqueNames(agentNames: string[]): void {
-  const seen = new Set<string>();
-  for (const name of agentNames) {
-    if (seen.has(name)) {
-      throw new Error(`Duplicate agent name "${name}".`);
-    }
-    seen.add(name);
-  }
-}
-
-function parseAgentTurnOutput(raw: string, allowedNextAgents: string[]): AgentTurnOutput {
-  const parsed = parsePossiblyWrappedJson(raw);
-  if (!isRecord(parsed)) {
-    throw new Error(`Structured output must be an object. Received: ${raw}`);
-  }
-
-  const answer = parsed.answer;
-  const nextAgent = parsed.nextAgent;
-  const readyToConclude = parsed.readyToConclude;
-
-  if (typeof answer !== "string") {
-    throw new Error(`"answer" must be a string. Received: ${raw}`);
-  }
-
-  if (typeof nextAgent !== "string") {
-    throw new Error(`"nextAgent" must be a string. Received: ${raw}`);
-  }
-
-  if (!allowedNextAgents.includes(nextAgent)) {
-    throw new Error(
-      `"nextAgent" must be one of [${allowedNextAgents.join(", ")}]. Received: ${raw}`,
-    );
-  }
-
-  if (typeof readyToConclude !== "boolean") {
-    throw new Error(`"readyToConclude" must be a boolean. Received: ${raw}`);
-  }
-
-  return {
-    answer,
-    nextAgent,
-    readyToConclude,
-  };
-}
-
-function parsePossiblyWrappedJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fenced && fenced[1]) {
-      return JSON.parse(fenced[1]);
-    }
-
-    const firstBrace = raw.indexOf("{");
-    const lastBrace = raw.lastIndexOf("}");
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-      return JSON.parse(raw.slice(firstBrace, lastBrace + 1));
-    }
-  }
-
-  throw new Error(`Could not parse structured output JSON: ${raw}`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function toBlockquote(text: string): string {
-  if (text.trim().length === 0) {
-    return "> ";
-  }
-  return text
-    .split("\n")
-    .map((line) => `> ${line}`)
-    .join("\n");
-}
-
-function toTextInput(text: string): TextInput {
-  return { type: "text", text };
-}
-
-function buildUnseenBlock(messages: BufferedMessage[]): string[] {
-  if (messages.length === 0) {
-    return ["- (none)"];
-  }
-  return messages.map((message) => `- [turn ${message.turnNumber}] ${message.from}: ${message.answer}`);
 }

@@ -10,6 +10,7 @@ import { createConversationLogPath } from "./path-utils.js";
 export type RunConversationForPromptInput = {
   prompt: string;
   maxTurns?: number;
+  warningTurnsBeforeMax?: number;
   logFilePath?: string;
   runStamp?: string;
   logBaseDir?: string;
@@ -56,6 +57,7 @@ export async function runConversationForPrompt(
     conversationGoal: input.prompt,
     firstSpeaker: DEFAULT_FIRST_SPEAKER,
     maxTurns: input.maxTurns,
+    warningTurnsBeforeMax: input.warningTurnsBeforeMax,
   });
 
   return {

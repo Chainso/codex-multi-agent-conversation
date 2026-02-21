@@ -25,6 +25,7 @@ const suiteConversationDir = join("logs/conversations", `suite-${runStamp}`);
 const conversationModel = process.env.CONVERSATION_MODEL;
 const qaModel = process.env.QA_MODEL;
 const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
+const warningTurnsBeforeMax = parseNonNegativeInt(process.env.WARNING_TURNS_BEFORE_MAX);
 
 const results = await runWithConcurrency(BASE_PROMPT_TEST_CASES, concurrency, async (testCase) => {
   const caseLabel = slugify(testCase.id);
@@ -34,6 +35,7 @@ const results = await runWithConcurrency(BASE_PROMPT_TEST_CASES, concurrency, as
     prompt: testCase.prompt,
     logFilePath: conversationLogPath,
     maxTurns: 50,
+    warningTurnsBeforeMax,
     model: conversationModel,
     codexPathOverride,
   });
@@ -71,6 +73,7 @@ const report = {
   conversationModel: conversationModel ?? null,
   qaModel: qaModel ?? null,
   codexPathOverride: codexPathOverride ?? null,
+  warningTurnsBeforeMax: warningTurnsBeforeMax ?? null,
   cases: sortedResults.length,
   averageScore,
   results: sortedResults,
@@ -126,6 +129,17 @@ function parsePositiveInt(rawValue: string | undefined, fallback: number): numbe
   const parsed = Number.parseInt(rawValue, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return fallback;
+  }
+  return parsed;
+}
+
+function parseNonNegativeInt(rawValue: string | undefined): number | undefined {
+  if (!rawValue) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error("WARNING_TURNS_BEFORE_MAX must be a non-negative integer.");
   }
   return parsed;
 }
