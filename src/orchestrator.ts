@@ -220,6 +220,11 @@ export class MultiAgentOrchestrator {
       const repetitiveNoUpdateTurn =
         unseenSnapshot.length === 0 && runtime.hasSpoken && similarityToPrevious >= 0.9;
       const readyToConclude = parsed.readyToConclude || repetitiveNoUpdateTurn;
+      const resolvedNextAgent = this.resolveNextAgent({
+        currentSpeaker: speaker,
+        proposedNextAgent: parsed.nextAgent,
+        speakerReadyToConclude: readyToConclude,
+      });
 
       runtime.unseenMessages = [];
       runtime.readyToConclude = readyToConclude;
@@ -230,7 +235,7 @@ export class MultiAgentOrchestrator {
         turnNumber,
         speaker,
         answer: parsed.answer,
-        nextAgent: parsed.nextAgent,
+        nextAgent: resolvedNextAgent,
         readyToConclude,
         structuredOutput: parsed.structuredOutput,
         rawResponse: turn.finalResponse,
@@ -259,7 +264,7 @@ export class MultiAgentOrchestrator {
           maxTurns,
           speaker,
           answer: parsed.answer,
-          nextAgent: parsed.nextAgent,
+          nextAgent: resolvedNextAgent,
           readyToConclude: parsed.readyToConclude,
           structuredOutput: parsed.structuredOutput,
           unseenMessagesConsumed: unseenSnapshot.length,
@@ -284,11 +289,11 @@ export class MultiAgentOrchestrator {
         break;
       }
 
-      const nextRuntime = this.getAgentRuntime(parsed.nextAgent);
+      const nextRuntime = this.getAgentRuntime(resolvedNextAgent);
       if (nextRuntime.readyToConclude) {
         nextRuntime.readyToConclude = false;
       }
-      speaker = parsed.nextAgent;
+      speaker = resolvedNextAgent;
     }
 
     const endTimestamp = nowIso();
@@ -374,6 +379,34 @@ export class MultiAgentOrchestrator {
       }
     }
     return true;
+  }
+
+  private resolveNextAgent(input: {
+    currentSpeaker: string;
+    proposedNextAgent: string;
+    speakerReadyToConclude: boolean;
+  }): string {
+    if (!input.speakerReadyToConclude) {
+      return input.proposedNextAgent;
+    }
+
+    const eligibleNotReadyAgents = this.agentNames.filter(
+      (name) => name !== input.currentSpeaker && !this.getAgentRuntime(name).readyToConclude,
+    );
+    if (eligibleNotReadyAgents.length === 0) {
+      return input.proposedNextAgent;
+    }
+    if (eligibleNotReadyAgents.includes(input.proposedNextAgent)) {
+      return input.proposedNextAgent;
+    }
+
+    const withUnseenMessages = eligibleNotReadyAgents.filter(
+      (name) => this.getAgentRuntime(name).unseenMessages.length > 0,
+    );
+    if (withUnseenMessages.length > 0) {
+      return withUnseenMessages[0];
+    }
+    return eligibleNotReadyAgents[0];
   }
 
   private resolveEmbeddedStructuredOutput(
