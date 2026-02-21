@@ -79,7 +79,6 @@ export class Thread {
       baseUrl: this._options.baseUrl,
       apiKey: this._options.apiKey,
       threadId: this._id,
-      fork: options?.fork,
       images,
       model: options?.model,
       sandboxMode: options?.sandboxMode,

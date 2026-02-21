@@ -11,7 +11,6 @@ export type ThreadOptions = {
   sandboxMode?: SandboxMode;
   workingDirectory?: string;
   skipGitRepoCheck?: boolean;
-  fork?: boolean;
   modelReasoningEffort?: ModelReasoningEffort;
   networkAccessEnabled?: boolean;
   webSearchMode?: WebSearchMode;
