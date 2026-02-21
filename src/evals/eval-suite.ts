@@ -9,6 +9,8 @@ import { evaluateConversation } from "./qa-evaluator.js";
 type EvalCaseResult = {
   id: string;
   prompt: string;
+  conversationId: string;
+  sqlitePath: string;
   conversationLogPath: string;
   turns: number;
   concluded: boolean;
@@ -26,6 +28,7 @@ const conversationModel = process.env.CONVERSATION_MODEL;
 const qaModel = process.env.QA_MODEL;
 const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
 const warningTurnsBeforeMax = parseNonNegativeInt(process.env.WARNING_TURNS_BEFORE_MAX);
+const sqlitePath = process.env.CONVERSATIONS_DB_PATH;
 
 const results = await runWithConcurrency(BASE_PROMPT_TEST_CASES, concurrency, async (testCase) => {
   const caseLabel = slugify(testCase.id);
@@ -33,6 +36,7 @@ const results = await runWithConcurrency(BASE_PROMPT_TEST_CASES, concurrency, as
 
   const conversationRun = await runConversationForPrompt({
     prompt: testCase.prompt,
+    sqlitePath,
     logFilePath: conversationLogPath,
     maxTurns: 50,
     warningTurnsBeforeMax,
@@ -54,6 +58,8 @@ const results = await runWithConcurrency(BASE_PROMPT_TEST_CASES, concurrency, as
   const result: EvalCaseResult = {
     id: testCase.id,
     prompt: testCase.prompt,
+    conversationId: conversationRun.conversationId,
+    sqlitePath: conversationRun.sqlitePath,
     conversationLogPath,
     turns: conversationRun.conversation.turns.length,
     concluded: conversationRun.conversation.concluded,

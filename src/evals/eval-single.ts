@@ -14,8 +14,10 @@ const conversationModel = process.env.CONVERSATION_MODEL;
 const qaModel = process.env.QA_MODEL;
 const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
 const warningTurnsBeforeMax = parseNonNegativeInt(process.env.WARNING_TURNS_BEFORE_MAX);
+const sqlitePath = process.env.CONVERSATIONS_DB_PATH;
 const conversationRun = await runConversationForPrompt({
   prompt,
+  sqlitePath,
   runStamp,
   logLabel: "single",
   maxTurns: 50,
@@ -38,6 +40,8 @@ const qa = await evaluateConversation({
 const report = {
   prompt,
   runStamp,
+  conversationId: conversationRun.conversationId,
+  sqlitePath: conversationRun.sqlitePath,
   conversationLogPath: conversationRun.logFilePath,
   turns: conversationRun.conversation.turns.length,
   concluded: conversationRun.conversation.concluded,

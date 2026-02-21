@@ -1,74 +1,80 @@
 # Codex Multi-Agent Conversation Orchestrator
 
-This project implements your model on top of `@openai/codex-sdk`:
+A TypeScript orchestrator for running multi-agent conversations on top of `@openai/codex-sdk`, with resumable state persistence in SQLite.
+
+## Features
 
 - One Codex thread per agent.
-- `nextAgent` is constrained per turn to other agents only (never the current speaker).
-- Agent role/context instructions are provided on that agent's first turn, then subsequent turns are incremental updates.
-- Every turn uses structured output with:
-  - `answer`
-  - `nextAgent`
-  - `readyToConclude`
-- Each agent receives only unseen final responses from other agents.
-- After an agent runs, its unseen buffer is cleared.
-- If an agent that previously set `readyToConclude=true` is asked to speak again, it is reset to `false` before speaking.
-- Conversation ends when all agents have `readyToConclude=true`.
+- Structured turn output: `answer`, `nextAgent`, `readyToConclude`.
+- `nextAgent` is constrained to other agents (no self-loop routing).
+- Per-agent unseen-message buffers from other agents only.
+- Resumable conversations via SQLite (`conversationId` + full orchestrator snapshot).
+- Streaming Markdown conversation logs.
+- Optional warning window before hard max-turn stop.
+- Single-prompt and suite-based QA evaluation scripts.
 
-## Install
+## Requirements
+
+- Node.js (project is currently tested with Node 24).
+- `codex` CLI available (or set `CODEX_PATH_OVERRIDE`).
+
+## Installation
 
 ```bash
 npm install
 ```
 
-This repo uses npm workspaces and consumes the local SDK package from
-`codex-sdk/typescript` (`@openai/codex-sdk` via `workspace:*`).
+This repository uses npm workspaces and resolves `@openai/codex-sdk` from the local workspace package at `codex-sdk/typescript`.
 
-## Run Demo
+## Quick Start
+
+Run a conversation:
 
 ```bash
 npm run demo -- "Plan how we migrate a monolith to services with low risk"
 ```
 
-Optional env vars:
+The run prints:
+- `conversationId` (for resume)
+- SQLite DB path
+- Markdown log path
 
-- `CONVERSATION_LOG_PATH` (optional fixed path; if omitted, a unique per-run file is created under `logs/conversations/`)
-- `CONVERSATION_MODEL` (optional model override for multi-agent conversation turns)
-- `WARNING_TURNS_BEFORE_MAX` (optional non-negative integer; default is number of agents, so warning starts at `maxTurns - agentCount`)
-- `CODEX_PATH_OVERRIDE` (optional absolute path to `codex` binary; useful with local SDK forks)
+## Resume a Conversation
 
-The log file is written incrementally while the conversation runs as readable Markdown
-with clear speaker sections and turn delimiters.
+```bash
+npm run resume -- <conversation-id>
+```
 
-## Evaluate One Prompt
+The orchestrator resumes using persisted state (thread IDs, unseen buffers, readiness flags, and turn progress).
 
-This runs:
-1. Multi-agent conversation generation.
-2. A single Codex QA pass over the initial prompt + generated conversation log.
-3. Structured QA output: `{ "score": number, "reason": string }`.
+## Evaluation
+
+Single prompt:
 
 ```bash
 npm run eval:single -- "Plan how we migrate a monolith to services with low risk"
 ```
 
-Outputs:
-- A per-run conversation log in `logs/conversations/...`
-- A structured evaluation report in `logs/evals/...-eval-report.json`
-
-## Evaluate Test Suite In Parallel
+Suite (parallel):
 
 ```bash
 npm run eval:suite
 ```
 
-Optional env vars:
+Base test cases are in `src/evals/eval-test-cases.ts`.
 
-- `EVAL_CONCURRENCY` (default: `3`)
-- `CONVERSATION_MODEL` (optional model override for conversation generation)
-- `QA_MODEL` (optional model override for QA scoring pass)
-- `WARNING_TURNS_BEFORE_MAX` (optional warning window size before max-turn hard stop)
-- `CODEX_PATH_OVERRIDE` (optional absolute path to `codex` binary)
+## Configuration
 
-This runs the base prompt set from `src/evals/eval-test-cases.ts` in parallel, runs QA scoring for each case, and writes an aggregated structured report to `logs/evals/...-eval-report.json`.
+Common environment variables:
+
+- `CONVERSATION_MODEL`: conversation model override.
+- `QA_MODEL`: QA evaluation model override.
+- `CODEX_PATH_OVERRIDE`: absolute path to `codex` binary.
+- `CONVERSATIONS_DB_PATH`: SQLite file path (default `./conversations.db`).
+- `CONVERSATION_LOG_PATH`: fixed log path (otherwise auto-generated under `logs/conversations/`).
+- `WARNING_TURNS_BEFORE_MAX`: warning window before max turns; default is number of agents.
+- `MAX_TURNS_OVERRIDE`: resume-only max-turn override.
+- `EVAL_CONCURRENCY`: suite concurrency (default `3`).
 
 ## Core API
 
@@ -77,20 +83,21 @@ import { MultiAgentOrchestrator } from "./src/index.js";
 
 const orchestrator = new MultiAgentOrchestrator(
   [
-    { name: "AgentA", rolePrompt: "..." },
-    { name: "AgentB", rolePrompt: "..." },
+    { name: "Planner", rolePrompt: "Break work into practical phases." },
+    { name: "Skeptic", rolePrompt: "Stress test assumptions." },
+    { name: "Builder", rolePrompt: "Propose implementation details." },
   ],
   {
-    sharedInstructions: "Keep it concise.",
+    sharedInstructions: "Keep responses concise.",
     logFilePath: "./conversation.log.md",
   },
 );
 
 const result = await orchestrator.runConversation({
   conversationGoal: "Solve X",
-  firstSpeaker: "AgentA",
+  firstSpeaker: "Planner",
   maxTurns: 50,
 });
 ```
 
-Main implementation: `src/orchestrator.ts`.
+Main orchestration entrypoint: `src/orchestrator.ts`.

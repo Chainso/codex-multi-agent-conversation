@@ -30,6 +30,7 @@ export type RunConversationInput = {
   firstSpeaker: string;
   maxTurns?: number;
   warningTurnsBeforeMax?: number;
+  startingTurnNumber?: number;
 };
 
 export type MultiAgentOrchestratorOptions = {
@@ -38,6 +39,8 @@ export type MultiAgentOrchestratorOptions = {
   threadOptions?: ThreadOptions;
   sharedInstructions?: string;
   logFilePath?: string;
+  initialAgentStates?: Record<string, AgentRuntimeState>;
+  hooks?: OrchestratorHooks;
 };
 
 export type BufferedMessage = {
@@ -52,4 +55,67 @@ export type AgentRuntime = {
   unseenMessages: BufferedMessage[];
   readyToConclude: boolean;
   hasSpoken: boolean;
+};
+
+export type AgentRuntimeState = {
+  threadId: string | null;
+  unseenMessages: BufferedMessage[];
+  readyToConclude: boolean;
+  hasSpoken: boolean;
+};
+
+export type OrchestratorStateSnapshot = {
+  agentDefinitions: AgentDefinition[];
+  sharedInstructions: string;
+  threadOptions: ThreadOptions;
+  agentStates: Record<string, AgentRuntimeState>;
+};
+
+export type ConversationStartHookContext = {
+  conversationGoal: string;
+  firstSpeaker: string;
+  maxTurns: number;
+  warningTurnsBeforeMax?: number;
+  warningStartTurn: number;
+  startingTurnNumber: number;
+  timestamp: string;
+  stateSnapshot: OrchestratorStateSnapshot;
+};
+
+export type BeforeTurnHookContext = {
+  conversationGoal: string;
+  maxTurns: number;
+  warningStartTurn: number;
+  turnNumber: number;
+  speaker: string;
+  warningMessage: string | null;
+  timestamp: string;
+  stateSnapshot: OrchestratorStateSnapshot;
+};
+
+export type TurnCompletedHookContext = {
+  conversationGoal: string;
+  maxTurns: number;
+  warningStartTurn: number;
+  turn: ConversationTurn;
+  timestamp: string;
+  stateSnapshot: OrchestratorStateSnapshot;
+};
+
+export type ConversationEndHookContext = {
+  conversationGoal: string;
+  maxTurns: number;
+  warningStartTurn: number;
+  concluded: boolean;
+  stopReason: ConversationResult["stopReason"];
+  turnsCompleted: number;
+  timestamp: string;
+  stateSnapshot: OrchestratorStateSnapshot;
+};
+
+export type OrchestratorHooks = {
+  onConversationStart?: (context: ConversationStartHookContext) => void | Promise<void>;
+  onBeforeTurn?: (context: BeforeTurnHookContext) => void | Promise<void>;
+  onTurnCompleted?: (context: TurnCompletedHookContext) => void | Promise<void>;
+  onConversationEnd?: (context: ConversationEndHookContext) => void | Promise<void>;
 };

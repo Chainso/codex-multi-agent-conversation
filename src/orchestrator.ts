@@ -11,9 +11,11 @@ import { createTurnOutputSchema } from "./orchestrator/schema.js";
 import type {
   AgentDefinition,
   AgentRuntime,
+  AgentRuntimeState,
   ConversationResult,
   ConversationTurn,
   MultiAgentOrchestratorOptions,
+  OrchestratorStateSnapshot,
   RunConversationInput,
 } from "./orchestrator/types.js";
 import { nowIso, validateUniqueNames } from "./orchestrator/utils.js";
@@ -21,9 +23,15 @@ import { nowIso, validateUniqueNames } from "./orchestrator/utils.js";
 export type {
   AgentDefinition,
   AgentTurnOutput,
+  ConversationEndHookContext,
+  ConversationStartHookContext,
+  BeforeTurnHookContext,
+  TurnCompletedHookContext,
   ConversationResult,
   ConversationTurn,
   MultiAgentOrchestratorOptions,
+  OrchestratorHooks,
+  OrchestratorStateSnapshot,
   RunConversationInput,
 } from "./orchestrator/types.js";
 
@@ -37,6 +45,7 @@ export class MultiAgentOrchestrator {
   private readonly sharedInstructions: string;
   private readonly logFilePath?: string;
   private readonly threadOptions: ThreadOptions;
+  private readonly hooks;
 
   private logDirectoryReady = false;
 
@@ -56,16 +65,33 @@ export class MultiAgentOrchestrator {
       skipGitRepoCheck: true,
       ...options.threadOptions,
     };
+    this.hooks = options.hooks;
 
     for (const definition of agentDefinitions) {
+      const initialState = options.initialAgentStates?.[definition.name];
+      const thread = initialState?.threadId
+        ? this.codex.resumeThread(initialState.threadId, this.threadOptions)
+        : this.codex.startThread(this.threadOptions);
       this.agents.set(definition.name, {
         definition,
-        thread: this.codex.startThread(this.threadOptions),
-        unseenMessages: [],
-        readyToConclude: false,
-        hasSpoken: false,
+        thread,
+        unseenMessages: initialState ? [...initialState.unseenMessages] : [],
+        readyToConclude: initialState?.readyToConclude ?? false,
+        hasSpoken: initialState?.hasSpoken ?? false,
       });
     }
+  }
+
+  static fromStateSnapshot(
+    snapshot: OrchestratorStateSnapshot,
+    options: Omit<MultiAgentOrchestratorOptions, "sharedInstructions" | "threadOptions" | "initialAgentStates"> = {},
+  ): MultiAgentOrchestrator {
+    return new MultiAgentOrchestrator(snapshot.agentDefinitions, {
+      ...options,
+      sharedInstructions: snapshot.sharedInstructions,
+      threadOptions: snapshot.threadOptions,
+      initialAgentStates: snapshot.agentStates,
+    });
   }
 
   async runConversation(input: RunConversationInput): Promise<ConversationResult> {
@@ -76,6 +102,13 @@ export class MultiAgentOrchestrator {
     const maxTurns = input.maxTurns ?? DEFAULT_MAX_TURNS;
     if (maxTurns <= 0) {
       throw new Error("maxTurns must be greater than 0.");
+    }
+    const startingTurnNumber = input.startingTurnNumber ?? 1;
+    if (!Number.isInteger(startingTurnNumber) || startingTurnNumber < 1) {
+      throw new Error("startingTurnNumber must be an integer greater than or equal to 1.");
+    }
+    if (startingTurnNumber > maxTurns + 1) {
+      throw new Error("startingTurnNumber cannot be greater than maxTurns + 1.");
     }
 
     const warningStartTurn = resolveWarningStartTurn({
@@ -88,10 +121,24 @@ export class MultiAgentOrchestrator {
     let speaker = input.firstSpeaker;
     let concluded = false;
     let stopReason: ConversationResult["stopReason"] = "max_turns_reached";
+    const startTimestamp = nowIso();
+
+    if (this.hooks?.onConversationStart) {
+      await this.hooks.onConversationStart({
+        conversationGoal: input.conversationGoal,
+        firstSpeaker: input.firstSpeaker,
+        maxTurns,
+        warningTurnsBeforeMax: input.warningTurnsBeforeMax,
+        warningStartTurn,
+        startingTurnNumber,
+        timestamp: startTimestamp,
+        stateSnapshot: this.getStateSnapshot(),
+      });
+    }
 
     await this.appendMarkdown(
       formatConversationStartLog({
-        timestamp: nowIso(),
+        timestamp: startTimestamp,
         conversationGoal: input.conversationGoal,
         firstSpeaker: input.firstSpeaker,
         maxTurns,
@@ -100,7 +147,7 @@ export class MultiAgentOrchestrator {
       }),
     );
 
-    for (let turnNumber = 1; turnNumber <= maxTurns; turnNumber += 1) {
+    for (let turnNumber = startingTurnNumber; turnNumber <= maxTurns; turnNumber += 1) {
       const runtime = this.getAgentRuntime(speaker);
 
       if (runtime.readyToConclude) {
@@ -112,6 +159,20 @@ export class MultiAgentOrchestrator {
         turnNumber >= warningStartTurn
           ? `Final-turn warning: hard stop at turn ${maxTurns}. Wrap up and converge ASAP.`
           : null;
+      const beforeTurnTimestamp = nowIso();
+
+      if (this.hooks?.onBeforeTurn) {
+        await this.hooks.onBeforeTurn({
+          conversationGoal: input.conversationGoal,
+          maxTurns,
+          warningStartTurn,
+          turnNumber,
+          speaker,
+          warningMessage,
+          timestamp: beforeTurnTimestamp,
+          stateSnapshot: this.getStateSnapshot(),
+        });
+      }
 
       const turnInput = buildTurnInput({
         agent: runtime.definition,
@@ -158,7 +219,7 @@ export class MultiAgentOrchestrator {
 
       await this.appendMarkdown(
         formatTurnLog({
-          timestamp: nowIso(),
+          timestamp: beforeTurnTimestamp,
           turnNumber,
           maxTurns,
           speaker,
@@ -169,6 +230,17 @@ export class MultiAgentOrchestrator {
           threadId: runtime.thread.id,
         }),
       );
+
+      if (this.hooks?.onTurnCompleted) {
+        await this.hooks.onTurnCompleted({
+          conversationGoal: input.conversationGoal,
+          maxTurns,
+          warningStartTurn,
+          turn: turnRecord,
+          timestamp: beforeTurnTimestamp,
+          stateSnapshot: this.getStateSnapshot(),
+        });
+      }
 
       if (this.allAgentsReadyToConclude()) {
         concluded = true;
@@ -183,14 +255,28 @@ export class MultiAgentOrchestrator {
       speaker = parsed.nextAgent;
     }
 
+    const endTimestamp = nowIso();
     await this.appendMarkdown(
       formatConversationEndLog({
-        timestamp: nowIso(),
+        timestamp: endTimestamp,
         concluded,
         stopReason,
         turns: turns.length,
       }),
     );
+
+    if (this.hooks?.onConversationEnd) {
+      await this.hooks.onConversationEnd({
+        conversationGoal: input.conversationGoal,
+        maxTurns,
+        warningStartTurn,
+        concluded,
+        stopReason,
+        turnsCompleted: turns.length,
+        timestamp: endTimestamp,
+        stateSnapshot: this.getStateSnapshot(),
+      });
+    }
 
     return {
       turns,
@@ -205,6 +291,24 @@ export class MultiAgentOrchestrator {
       threadIds[runtime.definition.name] = runtime.thread.id;
     }
     return threadIds;
+  }
+
+  getStateSnapshot(): OrchestratorStateSnapshot {
+    const agentStates: Record<string, AgentRuntimeState> = {};
+    for (const runtime of this.agents.values()) {
+      agentStates[runtime.definition.name] = {
+        threadId: runtime.thread.id,
+        unseenMessages: runtime.unseenMessages.map((message) => ({ ...message })),
+        readyToConclude: runtime.readyToConclude,
+        hasSpoken: runtime.hasSpoken,
+      };
+    }
+    return {
+      agentDefinitions: this.allAgents.map((agent) => ({ ...agent })),
+      sharedInstructions: this.sharedInstructions,
+      threadOptions: { ...this.threadOptions },
+      agentStates,
+    };
   }
 
   private getAgentRuntime(name: string): AgentRuntime {
