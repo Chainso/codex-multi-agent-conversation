@@ -4,12 +4,20 @@ export type AgentDefinition = {
   name: string;
   rolePrompt?: string;
   model?: string;
+  structuredOutput?: EmbeddedStructuredOutputConfig;
+};
+
+export type EmbeddedStructuredOutputConfig = {
+  schema: Record<string, unknown>;
+  instructions?: string;
+  required?: boolean;
 };
 
 export type AgentTurnOutput = {
   answer: string;
   nextAgent: string;
   readyToConclude: boolean;
+  structuredOutput?: unknown;
 };
 
 export type ConversationTurn = AgentTurnOutput & {
@@ -39,6 +47,7 @@ export type MultiAgentOrchestratorOptions = {
   codexOptions?: CodexOptions;
   threadOptions?: ThreadOptions;
   sharedInstructions?: string;
+  sharedStructuredOutput?: EmbeddedStructuredOutputConfig;
   logFilePath?: string;
   initialAgentStates?: Record<string, AgentRuntimeState>;
   hooks?: OrchestratorHooks;
@@ -70,6 +79,7 @@ export type AgentRuntimeState = {
 export type OrchestratorStateSnapshot = {
   agentDefinitions: AgentDefinition[];
   sharedInstructions: string;
+  sharedStructuredOutput?: EmbeddedStructuredOutputConfig;
   threadOptions: ThreadOptions;
   agentStates: Record<string, AgentRuntimeState>;
 };

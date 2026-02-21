@@ -32,6 +32,7 @@ type TurnRow = {
   answer: string;
   next_agent: string;
   ready_to_conclude: number;
+  structured_output_json: string | null;
   raw_response: string;
   unseen_messages_consumed: number;
   thread_id: string | null;
@@ -159,10 +160,10 @@ export class SqliteConversationStore {
         .prepare(
           `INSERT OR REPLACE INTO conversation_turns (
             conversation_id, turn_number, timestamp, speaker, answer, next_agent,
-            ready_to_conclude, raw_response, unseen_messages_consumed, thread_id
+            ready_to_conclude, structured_output_json, raw_response, unseen_messages_consumed, thread_id
           ) VALUES (
             :conversation_id, :turn_number, :timestamp, :speaker, :answer, :next_agent,
-            :ready_to_conclude, :raw_response, :unseen_messages_consumed, :thread_id
+            :ready_to_conclude, :structured_output_json, :raw_response, :unseen_messages_consumed, :thread_id
           )`,
         )
         .run({
@@ -173,6 +174,10 @@ export class SqliteConversationStore {
           answer: input.turn.answer,
           next_agent: input.turn.nextAgent,
           ready_to_conclude: input.turn.readyToConclude ? 1 : 0,
+          structured_output_json:
+            input.turn.structuredOutput === undefined
+              ? null
+              : JSON.stringify(input.turn.structuredOutput),
           raw_response: input.turn.rawResponse,
           unseen_messages_consumed: input.turn.unseenMessagesConsumed,
           thread_id: input.turn.threadId,
@@ -251,8 +256,8 @@ export class SqliteConversationStore {
     const turnRows = this.db
       .prepare(
         `SELECT
-          turn_number, timestamp, speaker, answer, next_agent,
-          ready_to_conclude, raw_response, unseen_messages_consumed, thread_id
+          turn_number, timestamp, speaker, answer, next_agent, ready_to_conclude,
+          structured_output_json, raw_response, unseen_messages_consumed, thread_id
          FROM conversation_turns
          WHERE conversation_id = ?
          ORDER BY turn_number ASC`,
@@ -282,6 +287,7 @@ export class SqliteConversationStore {
         answer: row.answer,
         nextAgent: row.next_agent,
         readyToConclude: row.ready_to_conclude === 1,
+        structuredOutput: parseStructuredOutputJson(row.structured_output_json, row.turn_number),
         rawResponse: row.raw_response,
         unseenMessagesConsumed: row.unseen_messages_consumed,
         threadId: row.thread_id,
@@ -316,11 +322,36 @@ export class SqliteConversationStore {
         answer TEXT NOT NULL,
         next_agent TEXT NOT NULL,
         ready_to_conclude INTEGER NOT NULL,
+        structured_output_json TEXT NULL,
         raw_response TEXT NOT NULL,
         unseen_messages_consumed INTEGER NOT NULL,
         thread_id TEXT NULL,
         PRIMARY KEY (conversation_id, turn_number)
       );
     `);
+
+    this.ensureColumn("conversation_turns", "structured_output_json", "TEXT NULL");
+  }
+
+  private ensureColumn(tableName: string, columnName: string, columnDefinition: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+    if (columns.some((column) => column.name === columnName)) {
+      return;
+    }
+    this.db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+  }
+}
+
+function parseStructuredOutputJson(raw: string | null, turnNumber: number): unknown {
+  if (raw === null) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `Failed to parse persisted structured_output_json for turn ${turnNumber}. Data may be corrupted.`,
+    );
   }
 }

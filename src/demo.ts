@@ -22,6 +22,9 @@ for (const turn of run.conversation.turns) {
   console.log(`Turn ${turn.turnNumber} | ${turn.speaker}`);
   console.log(`Answer: ${turn.answer}`);
   console.log(`Next: ${turn.nextAgent} | readyToConclude: ${turn.readyToConclude}`);
+  if (turn.structuredOutput !== undefined) {
+    console.log(`Structured output: ${JSON.stringify(turn.structuredOutput)}`);
+  }
   console.log("");
 }
 

@@ -1,6 +1,11 @@
+import { EMBEDDED_STRUCTURED_OUTPUT_KEY } from "./schema.js";
 import type { AgentTurnOutput } from "./types.js";
 
-export function parseAgentTurnOutput(raw: string, allowedNextAgents: string[]): AgentTurnOutput {
+export function parseAgentTurnOutput(
+  raw: string,
+  allowedNextAgents: string[],
+  options: { expectStructuredOutput: boolean } = { expectStructuredOutput: false },
+): AgentTurnOutput {
   const parsed = parsePossiblyWrappedJson(raw);
   if (!isRecord(parsed)) {
     throw new Error(`Structured output must be an object. Received: ${raw}`);
@@ -28,11 +33,23 @@ export function parseAgentTurnOutput(raw: string, allowedNextAgents: string[]): 
     throw new Error(`"readyToConclude" must be a boolean. Received: ${raw}`);
   }
 
-  return {
-    answer,
-    nextAgent,
-    readyToConclude,
-  };
+  const structuredOutput = parsed[EMBEDDED_STRUCTURED_OUTPUT_KEY];
+  if (options.expectStructuredOutput && structuredOutput === undefined) {
+    throw new Error(`"${EMBEDDED_STRUCTURED_OUTPUT_KEY}" is required when configured. Received: ${raw}`);
+  }
+
+  return structuredOutput === undefined
+    ? {
+        answer,
+        nextAgent,
+        readyToConclude,
+      }
+    : {
+        answer,
+        nextAgent,
+        readyToConclude,
+        structuredOutput,
+      };
 }
 
 function parsePossiblyWrappedJson(raw: string): unknown {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { MultiAgentOrchestrator } from "./orchestrator.js";
+import type { EmbeddedStructuredOutputConfig } from "./orchestrator.js";
 import type { ThreadOptions } from "@openai/codex-sdk";
 import {
   DEFAULT_AGENTS,
@@ -26,6 +27,7 @@ export type RunConversationForPromptInput = {
   logLabel?: string;
   model?: string;
   agentModels?: AgentModelOverrides;
+  sharedStructuredOutput?: EmbeddedStructuredOutputConfig;
   threadOptions?: ThreadOptions;
   codexPathOverride?: string;
 };
@@ -63,6 +65,7 @@ export async function runConversationForPrompt(
         }
       : undefined,
     sharedInstructions: DEFAULT_SHARED_INSTRUCTIONS,
+    sharedStructuredOutput: input.sharedStructuredOutput,
     logFilePath,
     hooks: createPersistenceHooks({
       store,
@@ -99,6 +102,7 @@ export type ResumeConversationByIdInput = {
   warningTurnsBeforeMax?: number;
   model?: string;
   agentModels?: AgentModelOverrides;
+  sharedStructuredOutput?: EmbeddedStructuredOutputConfig;
   threadOptions?: ThreadOptions;
   codexPathOverride?: string;
   logFilePath?: string;
@@ -134,6 +138,8 @@ export async function resumeConversationById(
       ...input.threadOptions,
       ...(input.model ? { model: input.model } : {}),
     },
+    sharedStructuredOutput:
+      input.sharedStructuredOutput ?? persisted.orchestratorState.sharedStructuredOutput,
   };
 
   const orchestrator = MultiAgentOrchestrator.fromStateSnapshot(snapshot, {

@@ -45,9 +45,22 @@ export function formatTurnLog(input: {
   answer: string;
   nextAgent: string;
   readyToConclude: boolean;
+  structuredOutput?: unknown;
   unseenMessagesConsumed: number;
   threadId: string | null;
 }): string {
+  const structuredOutputBlock =
+    input.structuredOutput === undefined
+      ? []
+      : [
+          "### Structured Output",
+          "",
+          "```json",
+          stringifyStructuredOutput(input.structuredOutput),
+          "```",
+          "",
+        ];
+
   return [
     `## Turn ${input.turnNumber}/${input.maxTurns} - ${input.speaker}`,
     "",
@@ -61,6 +74,7 @@ export function formatTurnLog(input: {
     "",
     toBlockquote(input.answer),
     "",
+    ...structuredOutputBlock,
     "---",
     "",
   ].join("\n");
@@ -93,4 +107,12 @@ function toBlockquote(text: string): string {
     .split("\n")
     .map((line) => `> ${line}`)
     .join("\n");
+}
+
+function stringifyStructuredOutput(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return JSON.stringify({ error: "Could not serialize structuredOutput." }, null, 2);
+  }
 }

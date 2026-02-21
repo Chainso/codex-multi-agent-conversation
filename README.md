@@ -6,6 +6,8 @@ A TypeScript orchestrator for running multi-agent conversations on top of `@open
 
 - One Codex thread per agent.
 - Structured turn output: `answer`, `nextAgent`, `readyToConclude`.
+- Optional embedded `structuredOutput` payload inside each turn output.
+- Structured output schema can be shared across all agents or overridden per agent.
 - `nextAgent` is constrained to other agents (no self-loop routing).
 - Per-agent unseen-message buffers from other agents only.
 - Resumable conversations via SQLite (`conversationId` + full orchestrator snapshot).
@@ -88,12 +90,33 @@ const orchestrator = new MultiAgentOrchestrator(
       name: "Planner",
       rolePrompt: "Break work into practical phases.",
       model: "gpt-5.1-codex-mini",
+      structuredOutput: {
+        schema: {
+          type: "object",
+          properties: {
+            milestones: { type: "array", items: { type: "string" } },
+          },
+          required: ["milestones"],
+          additionalProperties: false,
+        },
+      },
     },
     { name: "Skeptic", rolePrompt: "Stress test assumptions." },
     { name: "Builder", rolePrompt: "Propose implementation details." },
   ],
   {
     sharedInstructions: "Keep responses concise.",
+    sharedStructuredOutput: {
+      schema: {
+        type: "object",
+        properties: {
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+        required: ["confidence"],
+        additionalProperties: false,
+      },
+      instructions: "Set confidence for this turn's answer.",
+    },
     logFilePath: "./conversation.log.md",
   },
 );
@@ -106,5 +129,6 @@ const result = await orchestrator.runConversation({
 ```
 
 `AgentDefinition.model` overrides the global thread model for that specific agent.
+`AgentDefinition.structuredOutput` overrides `sharedStructuredOutput` for that specific agent.
 
 Main orchestration entrypoint: `src/orchestrator.ts`.

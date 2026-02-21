@@ -14,6 +14,7 @@ import type {
   AgentRuntimeState,
   ConversationResult,
   ConversationTurn,
+  EmbeddedStructuredOutputConfig,
   MultiAgentOrchestratorOptions,
   OrchestratorStateSnapshot,
   RunConversationInput,
@@ -29,6 +30,7 @@ export type {
   TurnCompletedHookContext,
   ConversationResult,
   ConversationTurn,
+  EmbeddedStructuredOutputConfig,
   MultiAgentOrchestratorOptions,
   OrchestratorHooks,
   OrchestratorStateSnapshot,
@@ -43,6 +45,7 @@ export class MultiAgentOrchestrator {
   private readonly agentNames: string[];
   private readonly allAgents: AgentDefinition[];
   private readonly sharedInstructions: string;
+  private readonly sharedStructuredOutput?: EmbeddedStructuredOutputConfig;
   private readonly logFilePath?: string;
   private readonly threadOptions: ThreadOptions;
   private readonly hooks;
@@ -54,12 +57,16 @@ export class MultiAgentOrchestrator {
       throw new Error("At least two agents must be provided.");
     }
 
-    this.allAgents = [...agentDefinitions];
-    this.agentNames = agentDefinitions.map((agent) => agent.name);
+    this.allAgents = agentDefinitions.map((agent) => normalizeAgentDefinition(agent));
+    this.agentNames = this.allAgents.map((agent) => agent.name);
     validateUniqueNames(this.agentNames);
 
     this.codex = options.codex ?? new Codex(options.codexOptions ?? {});
     this.sharedInstructions = options.sharedInstructions ?? "";
+    this.sharedStructuredOutput = normalizeEmbeddedStructuredOutputConfig(
+      options.sharedStructuredOutput,
+      "sharedStructuredOutput",
+    );
     this.logFilePath = options.logFilePath;
     this.threadOptions = {
       skipGitRepoCheck: true,
@@ -67,7 +74,7 @@ export class MultiAgentOrchestrator {
     };
     this.hooks = options.hooks;
 
-    for (const definition of agentDefinitions) {
+    for (const definition of this.allAgents) {
       const initialState = options.initialAgentStates?.[definition.name];
       const agentThreadOptions = this.getThreadOptionsForAgent(definition);
       const thread = initialState?.threadId
@@ -91,6 +98,7 @@ export class MultiAgentOrchestrator {
     return new MultiAgentOrchestrator(snapshot.agentDefinitions, {
       ...options,
       sharedInstructions: snapshot.sharedInstructions,
+      sharedStructuredOutput: snapshot.sharedStructuredOutput,
       threadOptions: snapshot.threadOptions,
       initialAgentStates: snapshot.agentStates,
     });
@@ -176,10 +184,12 @@ export class MultiAgentOrchestrator {
         });
       }
 
+      const embeddedStructuredOutput = this.resolveEmbeddedStructuredOutput(runtime.definition);
       const turnInput = buildTurnInput({
         agent: runtime.definition,
         allAgents: this.allAgents,
         sharedInstructions: this.sharedInstructions,
+        embeddedStructuredOutput,
         isFirstTurnForAgent: !runtime.hasSpoken,
         conversationGoal: input.conversationGoal,
         unseenMessages: unseenSnapshot,
@@ -188,10 +198,23 @@ export class MultiAgentOrchestrator {
       });
 
       const allowedNextAgents = this.getAllowedNextAgents(speaker);
-      const outputSchema = createTurnOutputSchema(allowedNextAgents);
+      const structuredOutputRequired = embeddedStructuredOutput
+        ? embeddedStructuredOutput.required ?? true
+        : false;
+      const outputSchema = createTurnOutputSchema(
+        allowedNextAgents,
+        embeddedStructuredOutput
+          ? {
+              schema: embeddedStructuredOutput.schema,
+              required: structuredOutputRequired,
+            }
+          : undefined,
+      );
 
       const turn = await runtime.thread.run(turnInput, { outputSchema });
-      const parsed = parseAgentTurnOutput(turn.finalResponse, allowedNextAgents);
+      const parsed = parseAgentTurnOutput(turn.finalResponse, allowedNextAgents, {
+        expectStructuredOutput: structuredOutputRequired,
+      });
       const similarityToPrevious =
         runtime.lastAnswer === null ? 0 : repetitionSimilarity(parsed.answer, runtime.lastAnswer);
       const repetitiveNoUpdateTurn =
@@ -209,6 +232,7 @@ export class MultiAgentOrchestrator {
         answer: parsed.answer,
         nextAgent: parsed.nextAgent,
         readyToConclude,
+        structuredOutput: parsed.structuredOutput,
         rawResponse: turn.finalResponse,
         unseenMessagesConsumed: unseenSnapshot.length,
         threadId: runtime.thread.id,
@@ -237,6 +261,7 @@ export class MultiAgentOrchestrator {
           answer: parsed.answer,
           nextAgent: parsed.nextAgent,
           readyToConclude: parsed.readyToConclude,
+          structuredOutput: parsed.structuredOutput,
           unseenMessagesConsumed: unseenSnapshot.length,
           threadId: runtime.thread.id,
         }),
@@ -316,8 +341,11 @@ export class MultiAgentOrchestrator {
       };
     }
     return {
-      agentDefinitions: this.allAgents.map((agent) => ({ ...agent })),
+      agentDefinitions: this.allAgents.map((agent) => cloneAgentDefinition(agent)),
       sharedInstructions: this.sharedInstructions,
+      sharedStructuredOutput: this.sharedStructuredOutput
+        ? cloneEmbeddedStructuredOutputConfig(this.sharedStructuredOutput)
+        : undefined,
       threadOptions: { ...this.threadOptions },
       agentStates,
     };
@@ -348,6 +376,12 @@ export class MultiAgentOrchestrator {
     return true;
   }
 
+  private resolveEmbeddedStructuredOutput(
+    agentDefinition: AgentDefinition,
+  ): EmbeddedStructuredOutputConfig | undefined {
+    return agentDefinition.structuredOutput ?? this.sharedStructuredOutput;
+  }
+
   private getThreadOptionsForAgent(agent: AgentDefinition): ThreadOptions {
     return agent.model ? { ...this.threadOptions, model: agent.model } : this.threadOptions;
   }
@@ -364,4 +398,72 @@ export class MultiAgentOrchestrator {
 
     await appendFile(this.logFilePath, markdown, "utf8");
   }
+}
+
+function normalizeEmbeddedStructuredOutputConfig(
+  config: EmbeddedStructuredOutputConfig | undefined,
+  label: string,
+): EmbeddedStructuredOutputConfig | undefined {
+  if (!config) {
+    return undefined;
+  }
+
+  if (!isRecord(config.schema)) {
+    throw new Error(`${label}.schema must be a JSON object.`);
+  }
+
+  if (config.instructions !== undefined && typeof config.instructions !== "string") {
+    throw new Error(`${label}.instructions must be a string when provided.`);
+  }
+
+  if (config.required !== undefined && typeof config.required !== "boolean") {
+    throw new Error(`${label}.required must be a boolean when provided.`);
+  }
+
+  const instructions = config.instructions?.trim();
+  return {
+    schema: cloneJsonObject(config.schema),
+    ...(instructions ? { instructions } : {}),
+    ...(config.required !== undefined ? { required: config.required } : {}),
+  };
+}
+
+function normalizeAgentDefinition(agent: AgentDefinition): AgentDefinition {
+  return {
+    ...agent,
+    ...(agent.structuredOutput
+      ? {
+          structuredOutput: normalizeEmbeddedStructuredOutputConfig(
+            agent.structuredOutput,
+            `agentDefinitions.${agent.name}.structuredOutput`,
+          ),
+        }
+      : {}),
+  };
+}
+
+function cloneEmbeddedStructuredOutputConfig(
+  config: EmbeddedStructuredOutputConfig,
+): EmbeddedStructuredOutputConfig {
+  return {
+    ...config,
+    schema: cloneJsonObject(config.schema),
+  };
+}
+
+function cloneAgentDefinition(agent: AgentDefinition): AgentDefinition {
+  return {
+    ...agent,
+    ...(agent.structuredOutput
+      ? { structuredOutput: cloneEmbeddedStructuredOutputConfig(agent.structuredOutput) }
+      : {}),
+  };
+}
+
+function cloneJsonObject(value: Record<string, unknown>): Record<string, unknown> {
+  return structuredClone(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -1,11 +1,13 @@
 import type { Input } from "@openai/codex-sdk";
 
-import type { AgentDefinition, BufferedMessage } from "./types.js";
+import { EMBEDDED_STRUCTURED_OUTPUT_KEY } from "./schema.js";
+import type { AgentDefinition, BufferedMessage, EmbeddedStructuredOutputConfig } from "./types.js";
 
 type BuildTurnInputArgs = {
   agent: AgentDefinition;
   allAgents: AgentDefinition[];
   sharedInstructions: string;
+  embeddedStructuredOutput?: EmbeddedStructuredOutputConfig;
   isFirstTurnForAgent: boolean;
   conversationGoal: string;
   unseenMessages: BufferedMessage[];
@@ -20,6 +22,10 @@ type TextInput = {
 
 export function buildTurnInput(args: BuildTurnInputArgs): Input {
   const unseenMessageEntries = buildUnseenEntries(args.unseenMessages);
+  const structuredOutputProtocolLines = buildStructuredOutputProtocolLines(
+    args.embeddedStructuredOutput,
+  );
+  const structuredOutputReminderLine = buildStructuredOutputReminderLine(args.embeddedStructuredOutput);
 
   if (args.isFirstTurnForAgent) {
     const participantsBlock = args.allAgents
@@ -39,6 +45,7 @@ export function buildTurnInput(args: BuildTurnInputArgs): Input {
     const protocolBlock = [
       "Conversation protocol (apply on every turn):",
       '- Return a JSON object with keys: "answer", "nextAgent", "readyToConclude".',
+      ...structuredOutputProtocolLines,
       '- "nextAgent" chooses which other agent should speak next.',
       '- Set "readyToConclude" to true only when you have no further meaningful contribution right now.',
       "- If later asked to speak again, continue normally and set readyToConclude based on that turn.",
@@ -82,6 +89,7 @@ export function buildTurnInput(args: BuildTurnInputArgs): Input {
   return [
     ...(args.warningMessage ? [toTextInput(args.warningMessage)] : []),
     deltaOnlyReminder,
+    ...(structuredOutputReminderLine ? [toTextInput(structuredOutputReminderLine)] : []),
     ...repetitionGuardBlock,
     ...unseenBlock,
   ];
@@ -108,6 +116,40 @@ function buildUnseenEntries(messages: BufferedMessage[]): string[] {
 
 function toTextInput(text: string): TextInput {
   return { type: "text", text };
+}
+
+function buildStructuredOutputProtocolLines(
+  embeddedStructuredOutput: EmbeddedStructuredOutputConfig | undefined,
+): string[] {
+  if (!embeddedStructuredOutput) {
+    return [];
+  }
+
+  const required = embeddedStructuredOutput.required ?? true;
+  const lines = [
+    required
+      ? `- Include "${EMBEDDED_STRUCTURED_OUTPUT_KEY}" and ensure it strictly matches the configured schema.`
+      : `- "${EMBEDDED_STRUCTURED_OUTPUT_KEY}" is optional; when present, it must strictly match the configured schema.`,
+  ];
+  const instructions = embeddedStructuredOutput.instructions?.trim();
+  if (instructions) {
+    lines.push(`- "${EMBEDDED_STRUCTURED_OUTPUT_KEY}" guidance: ${instructions}`);
+  }
+  return lines;
+}
+
+function buildStructuredOutputReminderLine(
+  embeddedStructuredOutput: EmbeddedStructuredOutputConfig | undefined,
+): string | null {
+  if (!embeddedStructuredOutput) {
+    return null;
+  }
+
+  const required = embeddedStructuredOutput.required ?? true;
+  if (required) {
+    return `Reminder: include "${EMBEDDED_STRUCTURED_OUTPUT_KEY}" and keep it schema-valid on this turn.`;
+  }
+  return `Reminder: if you include "${EMBEDDED_STRUCTURED_OUTPUT_KEY}", keep it schema-valid on this turn.`;
 }
 
 function clamp(value: number, min: number, max: number): number {
