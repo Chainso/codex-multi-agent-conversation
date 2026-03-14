@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { MultiAgentOrchestrator } from "./orchestrator.js";
-import type { EmbeddedStructuredOutputConfig } from "./orchestrator.js";
+import type { AgentDefinition, EmbeddedStructuredOutputConfig } from "./orchestrator.js";
 import type { ThreadOptions } from "@openai/codex-sdk";
 import {
   DEFAULT_AGENTS,
@@ -15,7 +15,7 @@ import { createConversationLogPath } from "./path-utils.js";
 
 export type { AgentModelOverrides };
 
-export type RunConversationForPromptInput = {
+export type BaseConversationRunInput = {
   prompt: string;
   maxTurns?: number;
   warningTurnsBeforeMax?: number;
@@ -32,6 +32,14 @@ export type RunConversationForPromptInput = {
   codexPathOverride?: string;
 };
 
+export type RunConfiguredConversationInput = BaseConversationRunInput & {
+  agents: AgentDefinition[];
+  firstSpeaker: string;
+  sharedInstructions?: string;
+};
+
+export type RunConversationForPromptInput = BaseConversationRunInput;
+
 export type RunConversationForPromptResult = {
   conversationId: string;
   sqlitePath: string;
@@ -40,8 +48,10 @@ export type RunConversationForPromptResult = {
   conversation: Awaited<ReturnType<MultiAgentOrchestrator["runConversation"]>>;
 };
 
-export async function runConversationForPrompt(
-  input: RunConversationForPromptInput,
+export type RunConfiguredConversationResult = RunConversationForPromptResult;
+
+export async function runConfiguredConversation(
+  input: RunConfiguredConversationInput,
 ): Promise<RunConversationForPromptResult> {
   const sqlitePath = input.sqlitePath ?? "./conversations.db";
   const conversationId = input.conversationId ?? randomUUID();
@@ -56,7 +66,7 @@ export async function runConversationForPrompt(
       label: input.logLabel,
     });
 
-  const agentDefinitions = applyAgentModelOverrides(DEFAULT_AGENTS, input.agentModels);
+  const agentDefinitions = applyAgentModelOverrides(input.agents, input.agentModels);
 
   const orchestrator = new MultiAgentOrchestrator(agentDefinitions, {
     codexOptions: input.codexPathOverride
@@ -64,7 +74,7 @@ export async function runConversationForPrompt(
           codexPathOverride: input.codexPathOverride,
         }
       : undefined,
-    sharedInstructions: DEFAULT_SHARED_INSTRUCTIONS,
+    sharedInstructions: input.sharedInstructions ?? "",
     sharedStructuredOutput: input.sharedStructuredOutput,
     logFilePath,
     hooks: createPersistenceHooks({
@@ -81,7 +91,7 @@ export async function runConversationForPrompt(
 
   const conversation = await orchestrator.runConversation({
     conversationGoal: input.prompt,
-    firstSpeaker: DEFAULT_FIRST_SPEAKER,
+    firstSpeaker: input.firstSpeaker,
     maxTurns: input.maxTurns,
     warningTurnsBeforeMax: input.warningTurnsBeforeMax,
   });
@@ -93,6 +103,17 @@ export async function runConversationForPrompt(
     logFilePath,
     conversation,
   };
+}
+
+export async function runConversationForPrompt(
+  input: RunConversationForPromptInput,
+): Promise<RunConversationForPromptResult> {
+  return runConfiguredConversation({
+    ...input,
+    agents: DEFAULT_AGENTS,
+    firstSpeaker: DEFAULT_FIRST_SPEAKER,
+    sharedInstructions: DEFAULT_SHARED_INSTRUCTIONS,
+  });
 }
 
 export type ResumeConversationByIdInput = {

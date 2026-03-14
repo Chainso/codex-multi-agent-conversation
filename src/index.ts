@@ -6,6 +6,7 @@ export type {
   ConversationStartHookContext,
   ConversationTurn,
   ConversationResult,
+  EmbeddedStructuredOutputConfig,
   RunConversationInput,
   MultiAgentOrchestratorOptions,
   OrchestratorHooks,
@@ -15,9 +16,13 @@ export type {
 
 export { MultiAgentOrchestrator } from "./orchestrator.js";
 export { runConversationForPrompt } from "./conversation-runner.js";
+export { runConfiguredConversation } from "./conversation-runner.js";
 export { resumeConversationById } from "./conversation-runner.js";
 export type {
   AgentModelOverrides,
+  BaseConversationRunInput,
+  RunConfiguredConversationInput,
+  RunConfiguredConversationResult,
   RunConversationForPromptInput,
   RunConversationForPromptResult,
   ResumeConversationByIdInput,
